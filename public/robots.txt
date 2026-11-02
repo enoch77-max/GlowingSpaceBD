@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /admin
+Disallow: /checkout
+Disallow: /cart
+Disallow: /order/
+Sitemap: https://glowingspace.com.bd/sitemap.xml

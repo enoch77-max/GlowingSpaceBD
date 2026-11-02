@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1c1917" />
+    <script>if ("scrollRestoration" in history) history.scrollRestoration = "manual";</script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23fbbf24'/%3E%3Ctext x='16' y='23' font-size='18' text-anchor='middle'%3E⚡%3C/text%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://images.pexels.com" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&family=Noto+Sans+Bengali:wght@400..700&display=swap" rel="stylesheet" />
+    <script>
+      // Preload the default hero only on the first home visit; admin-configured heroes may differ.
+      try {
+        if (location.pathname === "/" && !localStorage.getItem("gs_hero_slides_v1")) {
+          var hero = document.createElement("link");
+          hero.rel = "preload"; hero.as = "image"; hero.href = "/img/kit.jpg"; hero.fetchPriority = "high";
+          document.head.appendChild(hero);
+        }
+      } catch (_) { /* Storage may be unavailable in private browsing. */ }
+    </script>
+    <title>Glowing Space BD — Tested 18650 cells, modules & car LEDs</title>
+    <meta name="description" content="Tested 18650 batteries, charging circuits, car LED lights and unique electronics parts in Bangladesh. COD, bKash & Nagad." />
+    <meta property="og:site_name" content="Glowing Space BD" />
+    <meta property="og:title" content="Glowing Space BD" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_BD" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

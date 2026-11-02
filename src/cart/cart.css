@@ -1,0 +1,39 @@
+/* Cart dock: floating bubble (phone/tablet) and cart panels. */
+
+.cart-scrim { background: rgba(24, 24, 20, 0.35); animation: cart-fade 0.18s ease-out both; }
+
+.cart-panel {
+  background: #ffffff;
+  box-shadow: 0 -12px 40px rgba(24, 24, 20, 0.18);
+  animation: cart-sheet-in 0.28s cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+
+@media (min-width: 1024px) {
+  .cart-panel {
+    box-shadow: -18px 0 50px rgba(24, 24, 20, 0.16);
+    animation-name: cart-drawer-in;
+    animation-duration: 0.24s;
+    animation-timing-function: cubic-bezier(0.2, 0.75, 0.2, 1);
+  }
+}
+
+@keyframes cart-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cart-sheet-in { from { transform: translate3d(0, 100%, 0); } to { transform: none; } }
+@keyframes cart-drawer-in { from { transform: translate3d(100%, 0, 0); } to { transform: none; } }
+
+/* Adding a product jumps the cart bubble up, pops it, then settles it. */
+@keyframes cart-jump-pop {
+  0% { transform: translateY(0) scale(1); }
+  18% { transform: translateY(-12px) scale(1.16); }
+  36% { transform: translateY(0) scale(0.94); }
+  52% { transform: translateY(-6px) scale(1.1); }
+  68% { transform: translateY(0) scale(0.98); }
+  82% { transform: translateY(-2px) scale(1.04); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.cart-pop { animation: cart-jump-pop 0.72s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cart-panel, .cart-scrim, .cart-pop { animation: none !important; }
+}
