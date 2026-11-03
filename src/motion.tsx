@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Icon } from "./icons";
+import { escapeCssUrl } from "./utils/css";
+
+export { escapeCssUrl };
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
-
-/** Escape a URL for safe use inside CSS url("…"). */
-export const escapeCssUrl = (url: string) => url.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
 /** True when the visitor has asked their device for less motion. */
 export function usePrefersReducedMotion() {

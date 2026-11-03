@@ -23,7 +23,15 @@ export async function GET(request: Request) {
     if (!id || !/^01[3-9]\d{8}$/.test(phone)) return NextResponse.json({ ok: false, error: "Enter a valid order number and mobile number." }, { status: 400 });
     const [order] = await db.select().from(storeOrders).where(eq(storeOrders.id, id));
     if (!order || order.phone !== phone) return NextResponse.json({ ok: false, error: "No order matches that number and phone." }, { status: 404 });
-    return NextResponse.json({ ok: true, order }, { headers: { "Cache-Control": "no-store" } });
+    // Public tracking is verified by order ID + phone, but staff-only data must never leave the server.
+    const publicOrder = {
+      ...order,
+      internalNote: null,
+      parcelError: null,
+      assignee: null,
+      lines: order.lines.map(({ cost, inventoryMode, ...line }) => line),
+    };
+    return NextResponse.json({ ok: true, order: publicOrder }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const status = error instanceof Error && error.message === "ADMIN_UNAUTHORIZED" ? 401 : error instanceof Error && error.message === "ADMIN_FORBIDDEN" ? 403 : 500;
     return NextResponse.json({ ok: false, error: status === 401 ? "Your admin session has expired." : status === 403 ? "Your role cannot view orders." : "Order lookup is temporarily unavailable." }, { status });

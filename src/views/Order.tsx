@@ -446,7 +446,7 @@ export function Confirmation({ id }: { id: string }) {
         </div>
         <div className="flex items-start gap-2.5 border-t border-stone-100 bg-paper px-5 py-4 text-xs">
           <Icon name="map-pin" className="mt-0.5 h-4 w-4 shrink-0 text-stone-500" />
-          <p><span className="font-bold">{o.name}</span> · {o.phone}<br /><span className="text-stone-500">{o.address ? `${o.address}, ` : ""}{o.city === "dhaka" ? "Dhaka" : "Outside Dhaka"}</span></p>
+          <p><span className="font-bold">{o.name}</span> · {o.phone}<br /><span className="text-stone-500">{o.address}, {o.city === "dhaka" ? "Dhaka" : "Outside Dhaka"}</span></p>
         </div>
       </div>
 
@@ -606,7 +606,7 @@ export function Track() {
             })}
           </ol>
           <div className="border-t border-stone-100 bg-paper px-5 py-3.5 text-[11px]">
-            <p className="flex items-start gap-2"><Icon name="map-pin" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-500" /><span>{res.address ? `${res.address}, ` : ""}{res.city === "dhaka" ? "Dhaka" : "Outside Dhaka"} · {res.phone}</span></p>
+            <p className="flex items-start gap-2"><Icon name="map-pin" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-500" /><span>{res.address}, {res.city === "dhaka" ? "Dhaka" : "Outside Dhaka"} · {res.phone}</span></p>
           </div>
         </section>
       )}

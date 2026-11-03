@@ -311,7 +311,10 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
       if (data.config?.settings) setSettings(data.config.settings);
       if (Array.isArray(data.config?.couponRules)) setCouponRules(data.config.couponRules);
       setCatalogReady(true);
-    } catch { /* Retain the last catalog for browsing; checkout still revalidates on the server. */ }
+    } catch {
+      // Retain the seeded/cached catalog for local offline browsing so it doesn't freeze the UI.
+      setCatalogReady(true);
+    }
   }, [setCatalogProducts]);
   useEffect(() => {
     void refreshCatalog();
@@ -446,23 +449,25 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
   const selectForCheckout = (slug: string, qty: number, variant: VariantChoice) => updatePack(slug, qty, variant, "replace");
   const setQty = (slug: string, qty: number, variant?: VariantChoice) => updatePack(slug, qty, variant, "replace");
   const remove = (slug: string, choice?: VariantChoice) => {
-    const p = findProduct(slug, true);
-    // When the product is gone its variants cannot be resolved, so every line of it
-    // is purged. Otherwise one specific variant is targeted.
-    const variantId = !p
-      ? undefined
-      : choice === undefined
-        ? undefined
-        : typeof choice === "string" ? choice : findVariant(p, choice)?.id;
-    commitCart(removeCartLines(cartRef.current, slug, variantId, (line) => (p ? lineVariant(p, line)?.id : undefined)));
+    // Works even when the product was archived after the line was added.
+    commitCart(removeCartLines(cartRef.current, slug, choice, findProduct(slug, true)));
   };
 
   const items = useMemo<CartItem[]>(() => cart.map(line => {
-    // A cart line whose product was deleted still renders, but never with a partial object.
     const p = findProduct(line.slug, true) ?? {
-      slug: line.slug, sku: line.slug, name: "Unavailable product", category: "modules",
-      price: 0, stock: 0, pay: "cod", images: ["/img/kit.jpg"],
-      short: "This product is no longer available.", specs: [], rating: 0, reviews: 0,
+      slug: line.slug,
+      sku: line.slug,
+      name: "Unavailable product",
+      category: "modules",
+      price: 0,
+      stock: 0,
+      pay: "cod" as const,
+      images: ["/img/kit.jpg"],
+      short: "This product is no longer available.",
+      specs: [] as [string, string][],
+      rating: 0,
+      reviews: 0,
+      published: false,
     } satisfies Product;
     const v = lineVariant(p, line);
     return { p, qty: line.qty, unitsPerPack: v?.unitsPerPack ?? line.unitsPerPack ?? 1, variantId: v?.id ?? line.variantId ?? "unavailable", variantLabel: v?.label ?? "Unavailable variant · remove from cart", packPrice: v?.price ?? 0, saleUnit: inventoryMode(p) === "shared_units" ? "pack" : "item", maxQty: v ? maxVariantQuantity(cart, p, v) : 0, key: `${line.slug}::${v?.id ?? line.variantId ?? line.unitsPerPack ?? 1}` };

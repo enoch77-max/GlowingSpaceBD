@@ -42,6 +42,8 @@ export function productAvailable(p: Product): boolean {
 }
 
 export function variantComparison(p: Product, v: ProductVariant): number | undefined {
+  // An Original product is never shown as a discount — the authenticity mark replaces it.
+  if (p.original) return undefined;
   if (v.compareAtPrice !== undefined) return v.compareAtPrice > v.price ? v.compareAtPrice : undefined;
   if (inventoryMode(p) === "shared_units") {
     const single = getVariants(p).find(other => other.unitsPerPack === 1 && other.enabled !== false);

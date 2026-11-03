@@ -39,14 +39,11 @@ export async function writeProduct(input: Product, isNew = false, reason = "Prod
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${key}))`);
     const [row] = await tx.select().from(storeState).where(eq(storeState.key, key)).for("update");
     const previous = row?.value as (Product & { deleted?: boolean }) | undefined;
-    // An archived record does not hold the slug: it can be reused for a new product,
-    // and it is never a valid editing baseline.
-    const prior = previous?.deleted ? undefined : previous;
-    if (isNew && prior) throw new CatalogError("That product URL already exists. Choose another name or URL.");
-    if (!isNew && !prior) throw new CatalogError("This product no longer exists. Refresh the catalog.");
+    if (isNew && previous && !previous.deleted) throw new CatalogError("That product URL already exists. Choose another name or URL.");
+    if (!isNew && !previous) throw new CatalogError("This product no longer exists. Refresh the catalog.");
     if (inventoryOnly && isNew) throw new CatalogError("Catalog write permission is required to create products.", 403);
-    if (prior && (input.inventoryVersion ?? 0) !== (prior.inventoryVersion ?? 1)) throw new CatalogError("Stock or product details changed since this editor opened. Close and reopen the editor before saving.");
-    if (inventoryOnly && prior) {
+    if (previous && (input.inventoryVersion ?? 0) !== (previous.inventoryVersion ?? 1)) throw new CatalogError("Stock or product details changed since this editor opened. Close and reopen the editor before saving.");
+    if (inventoryOnly && previous) {
       const editable = (product: Product) => {
         const copy: Record<string, unknown> = { ...product };
         delete copy.stock;
@@ -54,9 +51,9 @@ export async function writeProduct(input: Product, isNew = false, reason = "Prod
         delete copy.inventoryVersion;
         return JSON.stringify(copy);
       };
-      if (editable(prior) !== editable(input)) throw new CatalogError("Your role can change stock and low-stock thresholds only.", 403);
+      if (editable(previous) !== editable(input)) throw new CatalogError("Your role can change stock and low-stock thresholds only.", 403);
     }
-    const saved = { ...normalizeProduct(input), inventoryVersion: (prior?.inventoryVersion ?? 0) + 1 };
+    const saved = { ...normalizeProduct(input), inventoryVersion: (previous?.inventoryVersion ?? 0) + 1 };
     await tx.insert(storeState).values({ key, value: saved, updatedAt: new Date() }).onConflictDoUpdate({ target: storeState.key, set: { value: saved, updatedAt: new Date() } });
     await tx.insert(storeState).values({ key: `inventory:event:${crypto.randomUUID()}`, value: { at: Date.now(), source: "admin", reason, slug: input.slug, before: previous ?? null, after: saved } });
     return saved;

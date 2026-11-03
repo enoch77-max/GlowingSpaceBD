@@ -69,7 +69,7 @@ function HeroSlide({
   const { go } = useRouter();
   const imgRef = useRef<HTMLImageElement>(null);
   const inStock = productAvailable(p);
-  const save = p.mrp && p.mrp > p.price ? Math.round((1 - p.price / p.mrp) * 100) : 0;
+  const save = !p.original && p.mrp && p.mrp > p.price ? Math.round((1 - p.price / p.mrp) * 100) : 0;
   const lines = slide.title.map((line) => line.split(" "));
   const wordTotal = lines.reduce((sum, words) => sum + words.length, 0);
   const Heading = position === 0 ? "h1" : "h2";
@@ -120,7 +120,7 @@ function HeroSlide({
 
           <div className="hero-in hero-price-row mt-6 flex flex-wrap items-baseline gap-x-3 gap-y-2" style={cssVar("--i", wordTotal + 2)}>
             <span className="hero-price text-[30px] font-extrabold leading-none tracking-tight tnum">{fmt(p.price)}</span>
-            {p.mrp && p.mrp > p.price ? <span className="hero-muted text-sm line-through tnum">{fmt(p.mrp)}</span> : null}
+            {!p.original && p.mrp && p.mrp > p.price ? <span className="hero-muted text-sm line-through tnum">{fmt(p.mrp)}</span> : null}
             {save > 0 ? <span className="hero-tag rounded-full px-2.5 py-1 text-[11px] font-bold">Save {save}%</span> : null}
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold">
               <Icon name="star" className="h-3.5 w-3.5 text-amber-500" />
@@ -192,7 +192,7 @@ function HeroSlide({
             />
           </div>
           <span className="hero-tag absolute right-3 top-3 rounded-full px-3 py-1.5 text-[11px] font-extrabold shadow-sm">
-            {save > 0 ? `Save ${save}%` : slide.tag}
+            {p.original ? "Original" : save > 0 ? `Save ${save}%` : slide.tag}
           </span>
           <div className="hero-float absolute -bottom-5 left-3 right-3 flex items-center gap-3 rounded-2xl bg-white p-3 text-stone-900 shadow-xl shadow-black/10 ring-1 ring-black/5 sm:left-6 sm:right-auto sm:w-[340px]">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#efebe1] text-stone-800">

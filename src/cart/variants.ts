@@ -23,21 +23,23 @@ export function changeVariantQuantity(lines: CartLine[], product: Product, choic
 }
 
 /**
- * Remove cart lines for one product. `variantId` targets a single variant;
- * `undefined` clears every line of that product — which is how a deleted or
- * hidden product is purged, even when its old lines no longer resolve to a
- * catalog variant.
+ * Removes cart lines for a product. With no choice, every line for the slug goes —
+ * including lines whose product was later archived, so stale rows can always be cleared.
+ * With a choice, raw variantId matches first, then the resolved variant id for live products.
  */
 export function removeCartLines(
   lines: CartLine[],
   slug: string,
-  variantId: string | undefined,
-  resolveVariantId?: (line: CartLine) => string | undefined,
+  choice?: VariantChoice,
+  product?: Product,
 ): CartLine[] {
-  return lines.filter((line) => {
+  if (choice === undefined) return lines.filter(line => line.slug !== slug);
+  const resolvedId = product ? findVariant(product, choice)?.id : undefined;
+  return lines.filter(line => {
     if (line.slug !== slug) return true;
-    if (variantId === undefined) return false;
-    return line.variantId !== variantId && resolveVariantId?.(line) !== variantId;
+    if (typeof choice === "string") return line.variantId !== choice && line.variantId !== resolvedId;
+    if (product) return lineVariant(product, line)?.id !== resolvedId;
+    return packUnits(line.unitsPerPack) !== packUnits(choice);
   });
 }
 
