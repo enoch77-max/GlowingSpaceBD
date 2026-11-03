@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
-export const SITE = import.meta.env.VITE_SITE_URL || "https://glowingspace.com.bd";
-export const WHATSAPP = import.meta.env.VITE_WHATSAPP_NUMBER || "8801700000000";
+export const SITE = process.env.NEXT_PUBLIC_SITE_URL || "https://glowingspace.com.bd";
+export const WHATSAPP = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "8801700000000";
 
 function meta(attr: "name" | "property", key: string, content: string) {
   let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`);

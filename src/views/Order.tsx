@@ -1,10 +1,11 @@
 import { Select } from "../ui/Select";
 import { useEffect, useRef, useState } from "react";
+import { getCachedRegion } from "../hooks/useDeliveryRegion";
 import { Link, usePageState, useRouter } from "../router";
 import { useStore, type Order, type OrderStatus } from "../store";
 import { fmt } from "../data";
-import { PayBadge, Field, inputCls, btnPrimary, btnAccent, QtyStepper } from "../components";
-import { Icon } from "../icons";
+import { Field, inputCls, btnPrimary, btnAccent, QtyStepper } from "../components";
+import { BkashLogo, Icon, NagadLogo } from "../icons";
 import { useSeo, SITE } from "../seo";
 import { ResponsiveImage } from "../ResponsiveImage";
 
@@ -15,7 +16,7 @@ type CheckoutDraft = { name: string; phone: string; address: string; city: strin
 
 function readDraft(user: string | null, needPrepay: boolean, freeDelivery: boolean, codEnabled: boolean): CheckoutDraft {
   const defaultMethod = needPrepay || !codEnabled ? "bkash" : "cod";
-  const fallback = { name: "", phone: user ?? "", address: "", city: "dhaka", method: defaultMethod };
+  const fallback = { name: "", phone: user ?? "", address: "", city: getCachedRegion() ?? "dhaka", method: defaultMethod };
   try {
     const saved = JSON.parse(sessionStorage.getItem(DRAFT_KEY) ?? "null") as Partial<CheckoutDraft> | null;
     if (!saved) return fallback;
@@ -33,7 +34,7 @@ function readDraft(user: string | null, needPrepay: boolean, freeDelivery: boole
 /* ============================= CART ============================= */
 
 export function Cart() {
-  const { items, setQty, remove, subtotal, discount, coupon, applyCoupon, removeCoupon, count, customerOrders, settings, couponRules } = useStore();
+  const { items, setQty, remove, subtotal, discount, coupon, applyCoupon, removeCoupon, count, customerOrders, settings, couponRules, cartIssue } = useStore();
   const { shoppingReturn, previous, back } = useRouter();
   const [code, setCode] = useState("");
   const [msg, setMsg] = useState("");
@@ -71,28 +72,30 @@ export function Cart() {
           <div className="rounded-2xl border border-stone-200 bg-white p-4">
             <div className="flex items-center gap-2.5 text-[13px]">
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-800"><Icon name="truck" className="h-4 w-4" /></span>
-              {remaining > 0
-                ? <p>Add <b className="tnum">{fmt(remaining)}</b> more for <b>free delivery in Dhaka</b>.</p>
-                : <p className="font-semibold text-emerald-700">You've unlocked free delivery in Dhaka.</p>}
+              {freeThreshold <= 0
+                ? <p>Delivery is calculated from your address at checkout.</p>
+                : remaining > 0
+                  ? <p>Add <b className="tnum">{fmt(remaining)}</b> more for <b>free delivery in Dhaka</b>.</p>
+                  : <p className="font-semibold text-emerald-700">You’ve unlocked free delivery in Dhaka.</p>}
             </div>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className={`h-full rounded-full transition-all ${remaining > 0 ? "bg-amber-400" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} /></div>
+            {freeThreshold > 0 && <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className={`h-full rounded-full transition-all ${remaining > 0 ? "bg-amber-400" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} /></div>}
           </div>
 
           <ul className="mt-4 divide-y divide-stone-100 overflow-hidden rounded-2xl border border-stone-200 bg-white">
-            {items.map(({ p, qty }) => (
-              <li key={p.slug} className="flex gap-3 p-3.5 sm:gap-4 sm:p-4">
+            {items.map(({ p, qty, unitsPerPack, variantId, variantLabel, packPrice, saleUnit, maxQty, key }) => (
+              <li key={key} className="flex gap-3 p-3.5 sm:gap-4 sm:p-4">
                 <Link to={`/product/${p.slug}`} className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-white ring-1 ring-stone-200/70 sm:h-24 sm:w-24"><ResponsiveImage src={p.images[0]} alt="" sizes="96px" className="h-full w-full object-cover" /></Link>
                 <div className="flex min-w-0 flex-1 flex-col">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <Link to={`/product/${p.slug}`} className="line-clamp-2 text-[13px] font-bold leading-snug hover:underline sm:text-sm">{p.name}</Link>
-                      <div className="mt-1 flex items-center gap-2"><PayBadge pay={p.pay} compact /><span className="hidden font-mono text-[10px] text-stone-400 sm:inline">{p.sku}</span></div>
+                      <div className="mt-1 text-[11px] font-semibold text-stone-600">{variantLabel}</div>
                     </div>
-                    <button onClick={() => remove(p.slug)} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-stone-400 transition hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${p.name}`}><Icon name="trash" className="h-4 w-4" /></button>
+                    <button onClick={() => remove(p.slug, variantId)} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-stone-400 transition hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${p.name}, ${variantLabel}`}><Icon name="trash" className="h-4 w-4" /></button>
                   </div>
                   <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-2">
-                    <QtyStepper small qty={qty} setQty={(n) => setQty(p.slug, n)} max={Math.max(p.stock, 1)} />
-                    <div className="text-right"><p className="text-sm font-extrabold tnum">{fmt(p.price * qty)}</p><p className="text-[10px] text-stone-400 tnum">{fmt(p.price)} each</p></div>
+                    <QtyStepper small qty={qty} setQty={(n) => setQty(p.slug, n, variantId)} max={Math.max(maxQty, 1)} />
+                    <div className="text-right"><p className="text-sm font-extrabold tnum">{fmt(packPrice * qty)}</p><p className="text-[10px] text-stone-500 tnum">{fmt(packPrice)} / {saleUnit} · {qty * unitsPerPack} {qty * unitsPerPack === 1 ? "piece" : "pieces"}</p></div>
                   </div>
                 </div>
               </li>
@@ -141,15 +144,10 @@ export function Cart() {
             <div className="mt-3 flex items-baseline justify-between border-t border-stone-100 pt-3">
               <span className="text-sm font-bold">Total</span><span className="text-xl font-extrabold tnum">{fmt(subtotal - discount)}</span>
             </div>
-            {needPrepay && <p className="mt-2.5 flex gap-2 rounded-xl bg-violet-50 p-2.5 text-[11px] text-violet-900"><Icon name="info" className="mt-0.5 h-3.5 w-3.5 shrink-0" />{highValuePrepay ? `Orders of ${fmt(settings.autoPrepayAboveBdt)}+ require advance payment via bKash or Nagad.` : "Includes advance-payment items. bKash or Nagad at checkout."}</p>}
-            <Link to="/checkout" className={`${btnAccent} mt-4 w-full`}><Icon name="lock" className="h-4 w-4" />Checkout · {fmt(subtotal - discount)}</Link>
+            {needPrepay && <p className="mt-2.5 flex gap-2 rounded-xl bg-violet-50 p-2.5 text-[11px] text-violet-900"><Icon name="info" className="mt-0.5 h-3.5 w-3.5 shrink-0" />Some items in this cart require advance payment. Payment choices are shown at checkout.</p>}
+            {cartIssue && <p role="alert" className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800">{cartIssue}</p>}
+            {cartIssue ? <button disabled className={`${btnAccent} mt-4 w-full`}>Update cart to checkout</button> : <Link to="/checkout" className={`${btnAccent} mt-4 w-full`}><Icon name="lock" className="h-4 w-4" />Checkout · {fmt(subtotal - discount)}</Link>}
             <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px] font-semibold text-stone-500"><Icon name="shield" className="h-3.5 w-3.5 text-emerald-600" />Safe payment · No account needed</div>
-          </div>
-          <div className="flex items-center justify-center gap-1.5 border-t border-stone-100 bg-paper px-4 py-3">
-            <span className="text-[10px] font-bold text-stone-500">PAY WITH</span>
-            {settings.enableBkash && <span className="rounded bg-pink-50 px-1.5 py-0.5 text-[10px] font-bold text-pink-700">bKash</span>}
-            {settings.enableNagad && <span className="rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-bold text-orange-700">Nagad</span>}
-            {settings.enableCod && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">COD</span>}
           </div>
         </aside>
       </div>
@@ -157,7 +155,7 @@ export function Cart() {
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur md:hidden safe-bottom">
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1"><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-stone-400">Total</p><p className="text-lg font-extrabold leading-none tnum">{fmt(subtotal - discount)}</p></div>
-          <Link to="/checkout" className={btnAccent + " shrink-0"}>Checkout<Icon name="arrow-right" className="h-4 w-4" /></Link>
+          {cartIssue ? <button disabled className={btnAccent + " shrink-0"}>Update cart</button> : <Link to="/checkout" className={btnAccent + " shrink-0"}>Checkout<Icon name="arrow-right" className="h-4 w-4" /></Link>}
         </div>
       </div>
     </div>
@@ -186,7 +184,7 @@ function Steps({ active }: { active: 1 | 2 | 3 }) {
 }
 
 export function Checkout() {
-  const { items, subtotal, discount, user, clear, saveOrder, coupon, customerOrders, settings } = useStore();
+  const { items, subtotal, discount, user, clear, saveOrder, coupon, customerOrders, settings, cartIssue } = useStore();
   const { go, back, previous } = useRouter();
   const highValuePrepay = settings.autoPrepayAboveBdt > 0 && subtotal >= settings.autoPrepayAboveBdt;
   const needPrepay = items.some((i) => i.p.pay === "prepay") || highValuePrepay || !settings.enableCod;
@@ -196,20 +194,27 @@ export function Checkout() {
   const nameRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLTextAreaElement>(null);
+  const requestId = useRef<string | null>(null);
+  const requestCartSignature = useRef("");
+  const [placing, setPlacing] = useState(false);
+  const [placeError, setPlaceError] = useState("");
 
   useEffect(() => {
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(f)); } catch { /* ignore */ }
   }, [f]);
 
-  const fallbackPrepay = settings.enableBkash ? "bkash" : "nagad";
+  const freeDhaka = settings.freeDhakaThreshold > 0 && subtotal >= settings.freeDhakaThreshold;
+  const shipping = f.city === "dhaka" ? (freeDhaka ? 0 : settings.dhakaDeliveryFee) : settings.outsideDeliveryFee;
 
   useEffect(() => {
-    if (needPrepay && (f.method === "cod" || f.method === "advance")) {
-      setF((current) => ({ ...current, method: fallbackPrepay }));
-    } else if (!needPrepay && f.method === "advance" && f.city === "dhaka" && subtotal >= settings.freeDhakaThreshold) {
-      setF((current) => ({ ...current, method: settings.enableCod ? "cod" : fallbackPrepay }));
-    }
-  }, [needPrepay, f.method, f.city, subtotal, settings.freeDhakaThreshold, settings.enableCod, fallbackPrepay]);
+    const available = (method: string) => method === "cod" ? settings.enableCod && !needPrepay
+      : method === "bkash" ? settings.enableBkash
+        : method === "nagad" ? settings.enableNagad
+          : settings.enableAdvanceShipping && !needPrepay && shipping > 0;
+    if (available(f.method)) return;
+    const next = ["cod", "bkash", "nagad", "advance"].find(available);
+    if (next) setF(current => ({ ...current, method: next }));
+  }, [f.method, needPrepay, shipping, settings.enableCod, settings.enableBkash, settings.enableNagad, settings.enableAdvanceShipping]);
 
   useSeo({ title: "Secure checkout", description: "Cash on delivery, bKash or Nagad checkout.", path: "/checkout" });
 
@@ -224,9 +229,6 @@ export function Checkout() {
     </div>
   );
 
-  const shipping = f.city === "dhaka"
-    ? (subtotal >= settings.freeDhakaThreshold ? 0 : settings.dhakaDeliveryFee)
-    : settings.outsideDeliveryFee;
   const total = subtotal - discount + shipping;
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => {
     setF((current) => ({ ...current, [k]: e.target.value }));
@@ -241,22 +243,35 @@ export function Checkout() {
     { id: "advance", name: "Advance delivery charge", note: !settings.enableAdvanceShipping ? "Disabled in store settings" : needPrepay ? "Not available for this bag" : shipping === 0 ? "Delivery is already free" : `${fmt(shipping)} at launch, rest on delivery`, icon: "truck" as const, off: needPrepay || shipping === 0 || !settings.enableAdvanceShipping, color: "text-stone-700 bg-stone-100" },
   ];
 
-  const place = (e: React.FormEvent) => {
-    e.preventDefault(); setErr(null);
+  const noPaymentMethod = methods.every(method => method.off);
+
+  const place = async (e: React.FormEvent) => {
+    e.preventDefault(); setErr(null); setPlaceError("");
+    if (placing || noPaymentMethod) return;
     const invalid = (field: "name" | "phone" | "address", message: string, input: HTMLInputElement | HTMLTextAreaElement | null) => {
       setErr({ field, message });
       input?.focus();
     };
+    if (cartIssue) return;
     if (f.name.trim().length < 2) return invalid("name", "Please enter your full name.", nameRef.current);
     if (!phoneOk(f.phone)) return invalid("phone", "Enter a valid mobile number, like 01712345678.", phoneRef.current);
     if (f.address.trim().length < 8) return invalid("address", "Please enter your full delivery address.", addressRef.current);
-    const id = "GS" + Date.now().toString().slice(-7);
+    const signature = JSON.stringify({ phone: normPhone(f.phone), lines: items.map(item => [item.p.slug, item.variantId, item.qty, item.packPrice]) });
+    if (requestCartSignature.current !== signature) {
+      requestCartSignature.current = signature;
+      requestId.current = "GS" + crypto.randomUUID();
+    }
+    const id = requestId.current!;
     const o: Order = {
       id, phone: normPhone(f.phone), name: f.name.trim(), address: f.address.trim(), city: f.city, method: f.method,
-      lines: items.map((i) => ({ slug: i.p.slug, name: i.p.name, qty: i.qty, price: i.p.price })), subtotal, discount, shipping, total, paid: false, created: Date.now(),
+      lines: items.map((i) => ({ slug: i.p.slug, name: i.p.name, qty: i.qty, price: i.packPrice, unitsPerPack: i.unitsPerPack, variantId: i.variantId, variantLabel: i.variantLabel })), subtotal, discount, shipping, total, paid: false, created: Date.now(),
     };
+    setPlacing(true);
+    const saved = await saveOrder(o, coupon);
+    setPlacing(false);
+    if (!saved) { setPlaceError("Order was not confirmed. Review the notification and updated cart, then retry. Your cart has been kept."); return; }
     try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
-    saveOrder(o); clear(); go(`/order/${id}`, { replace: true });
+    clear(); go(`/order/${id}`, { replace: true });
   };
 
   return (
@@ -291,7 +306,7 @@ export function Checkout() {
               <Field label="Mobile number" hint="For delivery updates"><input ref={phoneRef} className={inputCls} value={f.phone} onChange={set("phone")} aria-invalid={err?.field === "phone"} inputMode="tel" autoComplete="tel" placeholder="01XXXXXXXXX" required />{err?.field === "phone" && <span role="alert" className="mt-1 block text-xs text-red-700">{err.message}</span>}</Field>
               <div className="sm:col-span-2"><Field label="Delivery area">
                 <Select variant="store" className="w-full" value={f.city} onChange={set("city")}>
-                  <option value="dhaka">Inside Dhaka · {fmt(settings.dhakaDeliveryFee)} (free over {fmt(settings.freeDhakaThreshold)})</option>
+                  <option value="dhaka">Inside Dhaka · {fmt(settings.dhakaDeliveryFee)}{settings.freeDhakaThreshold > 0 ? ` (free over ${fmt(settings.freeDhakaThreshold)})` : ""}</option>
                   <option value="outside">Outside Dhaka · {fmt(settings.outsideDeliveryFee)}</option>
                 </Select>
               </Field></div>
@@ -317,12 +332,26 @@ export function Checkout() {
                   </span>
                 </p>
               )}
+              {noPaymentMethod && <p role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-800">No payment method is currently available for this cart. Please contact support or try again later.</p>}
               <div className="grid gap-2 sm:grid-cols-2">
                 {methods.map((m) => (
                   <label key={m.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-sm transition focus-within:ring-2 focus-within:ring-stone-900 focus-within:ring-offset-2 ${f.method === m.id ? "border-stone-900 ring-2 ring-amber-300" : "border-stone-200 hover:border-stone-400"} ${m.off ? "cursor-not-allowed opacity-45 hover:border-stone-200" : ""}`}>
                     <input type="radio" name="method" value={m.id} disabled={m.off} checked={f.method === m.id} onChange={() => setF((current) => ({ ...current, method: m.id }))} className="sr-only" />
-                    <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${m.color}`}><Icon name={m.icon} className="h-4 w-4" /></span>
-                    <span className="min-w-0 flex-1"><span className="block text-[13px] font-bold">{m.name}</span><span className="block text-[11px] text-stone-500">{m.note}</span></span>
+                    {m.id === "bkash" ? (
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white ring-1 ring-stone-200">
+                        <BkashLogo height={15} iconOnly badge={false} />
+                      </span>
+                    ) : m.id === "nagad" ? (
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white ring-1 ring-stone-200">
+                        <NagadLogo height={14} iconOnly badge={false} />
+                      </span>
+                    ) : (
+                      <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${m.color}`}><Icon name={m.icon} className="h-4 w-4" /></span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-bold">{m.name}</span>
+                      <span className="mt-0.5 block text-[11px] text-stone-500">{m.note}</span>
+                    </span>
                     <span className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${f.method === m.id ? "border-stone-900 bg-stone-900 text-white" : "border-stone-300"}`}>{f.method === m.id && <Icon name="check" className="h-2.5 w-2.5" strokeWidth={3} />}</span>
                   </label>
                 ))}
@@ -347,11 +376,11 @@ export function Checkout() {
             <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-bold text-stone-600">{items.length} item{items.length > 1 ? "s" : ""}</span>
           </div>
           <div className="max-h-[248px] space-y-3 overflow-y-auto px-5 py-4">
-            {items.map(({ p, qty }) => (
-              <div key={p.slug} className="flex items-center gap-3">
+            {items.map(({ p, qty, variantLabel, packPrice, key }) => (
+              <div key={key} className="flex items-center gap-3">
                 <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-sand"><ResponsiveImage src={p.images[0]} alt="" sizes="48px" className="h-full w-full object-cover" /><span className="absolute -right-0 -top-0 grid h-4 min-w-4 place-items-center rounded-full bg-stone-900 px-1 text-[9px] font-bold text-white">{qty}</span></span>
-                <p className="flex-1 text-[11px] font-semibold leading-snug">{p.name}</p>
-                <p className="text-xs font-bold tnum">{fmt(p.price * qty)}</p>
+                <p className="flex-1 text-[11px] font-semibold leading-snug">{p.name}<span className="mt-1 block font-medium text-stone-500">{variantLabel} · Qty {qty}</span></p>
+                <p className="text-xs font-bold tnum">{fmt(packPrice * qty)}</p>
               </div>
             ))}
           </div>
@@ -362,7 +391,9 @@ export function Checkout() {
               <div className="flex justify-between"><dt className="text-stone-600">Delivery</dt><dd className="font-semibold tnum">{shipping ? fmt(shipping) : "Free"}</dd></div>
             </dl>
             <div className="mt-3 flex items-baseline justify-between border-t border-stone-100 pt-3"><span className="font-bold">Total</span><span className="text-2xl font-extrabold tnum">{fmt(total)}</span></div>
-            <button className={`${btnAccent} mt-4 w-full`}><Icon name="lock" className="h-4 w-4" />Place order · {fmt(total)}</button>
+            {cartIssue && <p role="alert" className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800">{cartIssue} <Link to="/cart" className="underline">Update cart</Link></p>}
+            {placeError && <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-800">{placeError}</p>}
+            <button disabled={placing || noPaymentMethod || Boolean(cartIssue)} className={`${btnAccent} mt-4 w-full`}><Icon name="lock" className="h-4 w-4" />{placing ? "Confirming order…" : `Place order · ${fmt(total)}`}</button>
             <p className="mt-2.5 text-center text-[10px] text-stone-500">Frontend preview: no SMS or payment is sent.</p>
           </div>
         </aside>
@@ -374,11 +405,11 @@ export function Checkout() {
 /* ============================= CONFIRMATION ============================= */
 
 export function Confirmation({ id }: { id: string }) {
-  const { orders, settings } = useStore();
-  const o = orders.find((x) => x.id === id);
+  const { customerOrders, settings } = useStore();
+  const o = customerOrders.find((x) => x.id === id);
   const [copied, setCopied] = useState(false);
   useSeo({ title: "Order preview", description: "Review your order details in this frontend preview", path: `/order/${id}` });
-  if (!o) return <div className="shell py-32 text-center"><h1 className="text-2xl font-extrabold">Order not found</h1><p className="mt-2 text-sm text-stone-500">It may have been placed on another device.</p><Link to="/track" className={`${btnPrimary} mt-5`}>Track an order</Link></div>;
+  if (!o) return <div className="shell py-32 text-center"><h1 className="text-2xl font-extrabold">Order not available here</h1><p className="mt-2 text-sm text-stone-500">For privacy, verify the order number and phone used at checkout.</p><Link to={`/track?id=${encodeURIComponent(id)}`} className={`${btnPrimary} mt-5`}>Verify and track order</Link></div>;
   const share = `My Glowing Space BD preview order ${o.id} totals ${fmt(o.total)}. View: ${SITE}/track?id=${o.id}`;
   const copy = async () => { try { await navigator.clipboard.writeText(o.id); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { /* noop */ } };
   const payLabel = o.paymentStatus === "paid"
@@ -394,7 +425,7 @@ export function Confirmation({ id }: { id: string }) {
       <div className="text-center">
         <span className="pop-in mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-100 text-emerald-700"><Icon name="check" className="h-7 w-7" strokeWidth={2.6} /></span>
         <h1 className="mt-4 text-[28px] font-extrabold tracking-tight sm:text-4xl">Order preview, {o.name.split(" ")[0]}.</h1>
-        <p className="mt-2 text-sm text-stone-600">Saved in this browser. No payment, SMS or stock reservation has been made.</p>
+        <p className="mt-2 text-sm text-stone-600">Saved successfully. Inventory has been updated. No payment or SMS was sent.</p>
       </div>
 
       <div className="mt-7 overflow-hidden rounded-2xl border border-stone-200 bg-white">
@@ -404,7 +435,7 @@ export function Confirmation({ id }: { id: string }) {
           <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${o.paymentStatus === "paid" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>{payLabel}</span>
         </div>
         <div className="space-y-3 px-5 py-4">
-          {o.lines.map((l) => <div key={l.slug} className="flex items-center justify-between gap-3 text-sm"><span className="text-stone-700">{l.name} <span className="text-stone-400">×{l.qty}</span></span><span className="font-semibold tnum">{fmt(l.price * l.qty)}</span></div>)}
+          {o.lines.map((l) => <div key={`${l.slug}::${l.variantId ?? l.unitsPerPack ?? 1}`} className="flex items-center justify-between gap-3 text-sm"><span className="text-stone-700">{l.name}<span className="mt-0.5 block text-xs text-stone-500">{l.variantLabel ?? "1 piece"} · Qty {l.qty}</span></span><span className="font-semibold tnum">{fmt(l.price * l.qty)}</span></div>)}
         </div>
         <div className="px-5 pb-4">
           <dl className="space-y-1.5 border-t border-dashed border-stone-200 pt-3 text-sm">
@@ -415,7 +446,7 @@ export function Confirmation({ id }: { id: string }) {
         </div>
         <div className="flex items-start gap-2.5 border-t border-stone-100 bg-paper px-5 py-4 text-xs">
           <Icon name="map-pin" className="mt-0.5 h-4 w-4 shrink-0 text-stone-500" />
-          <p><span className="font-bold">{o.name}</span> · {o.phone}<br /><span className="text-stone-500">{o.address}, {o.city === "dhaka" ? "Dhaka" : "Outside Dhaka"}</span></p>
+          <p><span className="font-bold">{o.name}</span> · {o.phone}<br /><span className="text-stone-500">{o.address ? `${o.address}, ` : ""}{o.city === "dhaka" ? "Dhaka" : "Outside Dhaka"}</span></p>
         </div>
       </div>
 
@@ -437,7 +468,7 @@ export function Confirmation({ id }: { id: string }) {
 /* ============================= TRACKING ============================= */
 
 const STEPS = [
-  { label: "Preview saved", icon: "receipt" as const },
+  { label: "Order placed", icon: "receipt" as const },
   { label: "Confirmed", icon: "check-circle" as const },
   { label: "Packed", icon: "box" as const },
   { label: "On the way", icon: "truck" as const },
@@ -458,27 +489,66 @@ export function Track() {
   const { orders, settings } = useStore();
   const idFromUrl = search.get("id") ?? "";
   const phoneFromUrl = search.get("phone") ?? orders.find((order) => order.id.toLowerCase() === idFromUrl.toLowerCase())?.phone ?? "";
-  const findOrder = (number: string, mobile: string) => orders.find((order) => order.id.toLowerCase() === number.trim().toLowerCase() && order.phone === normPhone(mobile));
   const [id, setId] = useState(idFromUrl);
   const [phone, setPhone] = useState(phoneFromUrl);
-  const [res, setRes] = useState<Order | null | "none">(() => idFromUrl && phoneFromUrl ? findOrder(idFromUrl, phoneFromUrl) ?? "none" : null);
+  const [res, setRes] = useState<Order | null | "none">(() => idFromUrl && phoneFromUrl ? orders.find(order => order.id.toLowerCase() === idFromUrl.toLowerCase() && order.phone === normPhone(phoneFromUrl)) ?? null : null);
+  const [loading, setLoading] = useState(false);
+  const [lookupError, setLookupError] = useState("");
+  const requestSequence = useRef(0);
+  useSeo({ title: "Track your order", description: "Track your Glowing Space BD order with order number and phone.", path: "/track" });
+
+  const lookupRemote = async (number: string, mobile: string) => {
+    const sequence = ++requestSequence.current;
+    setLookupError("");
+    if (!number.trim() || !phoneOk(mobile)) { setRes("none"); return; }
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/orders?id=${encodeURIComponent(number.trim())}&phone=${encodeURIComponent(normPhone(mobile))}`, { cache: "no-store" });
+      if (sequence !== requestSequence.current) return;
+      if (response.ok) {
+        const data = await response.json();
+        setRes(data.order as Order);
+      } else if (response.status === 404) setRes("none");
+      else {
+        setRes(null);
+        setLookupError("Order lookup is temporarily unavailable. Please try again.");
+      }
+    } catch {
+      if (sequence === requestSequence.current) {
+        setRes(null);
+        setLookupError("Could not connect to order tracking. Check your connection and retry.");
+      }
+    } finally {
+      if (sequence === requestSequence.current) setLoading(false);
+    }
+  };
+
   useEffect(() => {
     setId(idFromUrl);
     setPhone(phoneFromUrl);
-    setRes(idFromUrl && phoneFromUrl ? findOrder(idFromUrl, phoneFromUrl) ?? "none" : null);
-  }, [idFromUrl, phoneFromUrl, orders]);
-  useSeo({ title: "Track your order", description: "Track your Glowing Space BD order with order number and phone.", path: "/track" });
-  const lookup = (e: React.FormEvent) => { e.preventDefault(); setRes(findOrder(id, phone) ?? "none"); };
+    if (idFromUrl && phoneFromUrl) void lookupRemote(idFromUrl, phoneFromUrl);
+    else setRes(null);
+    // URL changes are the only automatic lookup trigger; submissions use the same verified request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idFromUrl, phoneFromUrl]);
+
+  const lookup = (event: React.FormEvent) => { event.preventDefault(); void lookupRemote(id, phone); };
   const step = res && res !== "none" ? STATUS_TO_STEP[res.status ?? "placed"] : 0;
   const isCancelled = res && res !== "none" && res.status === "cancelled";
-  const day = (o: Order) => new Date(o.created).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  const day = (timestamp: number) => new Date(timestamp).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  const stepTimestamp = (order: Order, index: number) => {
+    if (index === 0) return order.created;
+    const label = ["", "confirmed", "packed", "shipped", "delivered"][index];
+    const event = [...(order.events ?? [])].reverse().find(item => item.label.toLowerCase().includes(label) || (label === "shipped" && item.label.toLowerCase().includes("dispatch")));
+    return event?.at ?? null;
+  };
 
   return (
     <div className="shell max-w-2xl pt-8">
       <div className="text-center">
         <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-white ring-1 ring-stone-200"><Icon name="box" className="h-5 w-5" /></span>
         <h1 className="mt-3 text-[28px] font-extrabold tracking-tight sm:text-3xl">Track your order</h1>
-        <p className="mt-1.5 text-sm text-stone-500">Enter the order number and phone used in this browser's preview checkout.</p>
+        <p className="mt-1.5 text-sm text-stone-500">Enter the order number and mobile number used at checkout.</p>
       </div>
       <form onSubmit={lookup} className="mt-6 rounded-2xl border border-stone-200 bg-white p-4 sm:p-5">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -486,7 +556,7 @@ export function Track() {
           <Field label="Mobile number"><input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="01XXXXXXXXX" required autoComplete="tel" /></Field>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button className={btnPrimary}><Icon name="search" className="h-4 w-4" />Track order</button>
+          <button disabled={loading} className={btnPrimary}><Icon name="search" className="h-4 w-4" />{loading ? "Looking up…" : "Track order"}</button>
           <Link to="/login" className="text-xs font-bold text-stone-500 underline underline-offset-2">Or sign in to see all orders</Link>
         </div>
       </form>
@@ -494,6 +564,7 @@ export function Track() {
       {res === "none" && (
         <p role="alert" className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 p-3.5 text-sm text-red-800"><Icon name="alert" className="mt-0.5 h-4 w-4 shrink-0" />No order matches that number and phone. Check both and try again.</p>
       )}
+      {lookupError && <p role="alert" className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 p-3.5 text-sm text-red-800"><Icon name="alert" className="mt-0.5 h-4 w-4 shrink-0" />{lookupError}</p>}
 
       {res && res !== "none" && (
         <section className="mt-4 overflow-hidden rounded-2xl border border-stone-200 bg-white rise" aria-label="Order status">
@@ -510,7 +581,7 @@ export function Track() {
               {res.trackingCode && <span className="font-mono font-bold text-emerald-900">Tracking #{res.trackingCode}</span>}
             </div>
           ) : (
-            <p className="border-b border-stone-100 px-5 py-3 text-xs text-stone-600">This is a local preview. Status updates made in the Admin Console appear here immediately.</p>
+            <p className="border-b border-stone-100 px-5 py-3 text-xs text-stone-600">Your order is being reviewed. Courier details appear here after dispatch.</p>
           )}
           <ol className="px-5 py-5">
             {STEPS.map((s, i) => {
@@ -524,18 +595,18 @@ export function Track() {
                     <div className="flex items-baseline justify-between gap-2">
                       <p className={`text-[13px] font-bold ${i > step || isCancelled ? "text-stone-400" : ""}`}>
                         {s.label}
-                        {cur && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-extrabold text-amber-900">{step === 0 ? "PREVIEW" : "CURRENT"}</span>}
+                        {cur && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-extrabold text-amber-900">CURRENT</span>}
                       </p>
-                      <p className={`text-[10px] ${i <= step && !isCancelled ? "text-stone-500" : "text-stone-400"}`}>{i <= step && !isCancelled ? day(res) : "Pending"}</p>
+                      <p className={`text-[10px] ${i <= step && !isCancelled ? "text-stone-500" : "text-stone-400"}`}>{i <= step && !isCancelled ? (stepTimestamp(res, i) ? day(stepTimestamp(res, i)!) : "Updated") : "Pending"}</p>
                     </div>
-                    {i === 0 && <p className="mt-0.5 text-[11px] text-stone-500">Saved on this device. Manage status in /admin/orders.</p>}
+                    {i === 0 && <p className="mt-0.5 text-[11px] text-stone-500">Your order has been received. Further updates appear here.</p>}
                   </div>
                 </li>
               );
             })}
           </ol>
           <div className="border-t border-stone-100 bg-paper px-5 py-3.5 text-[11px]">
-            <p className="flex items-start gap-2"><Icon name="map-pin" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-500" /><span>{res.address}, {res.city === "dhaka" ? "Dhaka" : "Outside Dhaka"} · {res.phone}</span></p>
+            <p className="flex items-start gap-2"><Icon name="map-pin" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-500" /><span>{res.address ? `${res.address}, ` : ""}{res.city === "dhaka" ? "Dhaka" : "Outside Dhaka"} · {res.phone}</span></p>
           </div>
         </section>
       )}

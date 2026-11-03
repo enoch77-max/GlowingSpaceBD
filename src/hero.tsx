@@ -1,8 +1,8 @@
+import { getVariants, productAvailable } from "./catalog/inventory";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { Link, usePageState, useRouter } from "./router";
 import { useStore } from "./store";
 import { fmt, type HeroSlideConfig, type Product } from "./data";
-import { PayBadge } from "./components";
 import { CATEGORY_ICON, Icon, type IconName } from "./icons";
 import { flyToCart, useIsVisible, usePrefersReducedMotion } from "./motion";
 import { ResponsiveImage, heroPrefetchUrl } from "./ResponsiveImage";
@@ -68,7 +68,7 @@ function HeroSlide({
   const { add } = useStore();
   const { go } = useRouter();
   const imgRef = useRef<HTMLImageElement>(null);
-  const inStock = p.stock > 0;
+  const inStock = productAvailable(p);
   const save = p.mrp && p.mrp > p.price ? Math.round((1 - p.price / p.mrp) * 100) : 0;
   const lines = slide.title.map((line) => line.split(" "));
   const wordTotal = lines.reduce((sum, words) => sum + words.length, 0);
@@ -136,8 +136,7 @@ function HeroSlide({
                 <span>{text}</span>
               </span>
             ))}
-            <PayBadge pay={p.pay} compact />
-            {inStock && p.stock < (p.lowStockAt ?? 20) ? (
+            {inStock && p.stock < (p.lowStockAt ?? 5) ? (
               <span className="hero-chip inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-bold">
                 <span className="relative flex h-2 w-2 shrink-0">
                   <span className="ping text-amber-500" />
@@ -158,7 +157,7 @@ function HeroSlide({
             <button
               type="button"
               disabled={!inStock}
-              onClick={() => { add(p.slug); go("/checkout"); }}
+              onClick={() => { if (getVariants(p).filter(v => v.enabled !== false).length > 1) go(`/product/${p.slug}`); else if (add(p.slug)) go("/checkout"); }}
               className="hero-cta sheen inline-flex min-h-[48px] min-w-[150px] items-center justify-center gap-2 rounded-full px-6 text-sm font-bold transition duration-200 hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
             >
               <span>{inStock ? "Buy now" : "Sold out"}</span>
@@ -167,7 +166,7 @@ function HeroSlide({
             <button
               type="button"
               disabled={!inStock}
-              onClick={() => { add(p.slug); flyToCart(imgRef.current, p.images[0]); }}
+              onClick={() => { if (getVariants(p).filter(v => v.enabled !== false).length > 1) go(`/product/${p.slug}`); else if (add(p.slug)) flyToCart(imgRef.current, p.images[0]); }}
               className="hero-ghost inline-flex min-h-[48px] items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Icon name="cart" className="h-4 w-4" />
@@ -201,10 +200,7 @@ function HeroSlide({
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-bold">{p.name}</span>
-              <span className="mt-1 flex items-center justify-between gap-2 text-[11px] text-stone-500">
-                <span className="truncate">{p.short}</span>
-                <PayBadge pay={p.pay} compact />
-              </span>
+                <span className="mt-1 block truncate text-[11px] text-stone-500">{p.short}</span>
             </span>
           </div>
         </div>

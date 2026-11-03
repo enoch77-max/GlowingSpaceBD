@@ -36,7 +36,10 @@ export function buildDailySeries(orders: Order[], products: Product[], days: 7 |
       const bucket = buckets[index];
       bucket.revenue += order.total;
       bucket.orders++;
-      if (costMap) bucket.cost += order.lines.reduce((total, line) => total + (costMap.get(line.slug) ?? Math.round(line.price * 0.68)) * line.qty, 0);
+      if (costMap) bucket.cost += order.lines.reduce((total, line) => {
+        const unitCost = costMap.get(line.slug);
+        return total + (line.cost ?? (unitCost === undefined ? Math.round(line.price * 0.68) : unitCost * (line.unitsPerPack ?? 1))) * line.qty;
+      }, 0);
     }
   }
   return buckets.map(({ start: _start, cost, ...point }) => ({ ...point, profit: showFinance ? Math.max(0, point.revenue - cost) : 0 }));
@@ -342,7 +345,6 @@ export function CategoryDonutChart({
 
   const r = 68;
   const circ = 2 * Math.PI * r;
-  let acc = 0;
 
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-5">
@@ -360,10 +362,10 @@ export function CategoryDonutChart({
         <div className="relative mx-auto h-[188px] w-[188px] shrink-0">
           <svg viewBox="0 0 188 188" className="h-full w-full -rotate-90 select-none" aria-label="Category revenue share">
             <circle cx="94" cy="94" r={r} fill="none" stroke="#f1efe9" strokeWidth="22" />
-            {breakdown.map((item) => {
+            {breakdown.map((item, index) => {
               const len = Math.max(0, item.share * circ - 3);
-              const offset = -acc * circ;
-              acc += item.share;
+              const precedingShare = breakdown.slice(0, index).reduce((sum, entry) => sum + entry.share, 0);
+              const offset = -precedingShare * circ;
               const dimmed = activeSlug !== null && activeSlug !== item.slug;
               return (
                 <circle

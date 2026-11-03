@@ -1,3 +1,4 @@
+import { getVariants, productAvailable, variantComparison, variantIsLow, variantSavings } from "./catalog/inventory";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useRouter } from "./router";
 import { useStore } from "./store";
@@ -47,7 +48,7 @@ export function QtyStepper({ qty, setQty, max = 99, small = false }: { qty: numb
   const h = small ? "h-8 w-8" : "h-10 w-10";
   // Keep the running total here so two taps in the same frame both count.
   const pending = useRef(qty);
-  pending.current = qty;
+  useEffect(() => { pending.current = qty; }, [qty]);
   const step = (delta: number) => {
     const next = Math.max(1, Math.min(max, pending.current + delta));
     pending.current = next;
@@ -70,37 +71,54 @@ export function QtyStepper({ qty, setQty, max = 99, small = false }: { qty: numb
 
 export function ProductCard({ p }: { p: Product }) {
   const { add, categoryLabel } = useStore();
-  const hasDiscount = Boolean(p.mrp && p.mrp > p.price);
-  const lowAt = p.lowStockAt ?? 10;
+  const { go } = useRouter();
+  const activeVariants = getVariants(p).filter((variant) => variant.enabled !== false);
+  const hasOptions = activeVariants.length > 1;
+  const available = productAvailable(p);
+  const someLow = activeVariants.some((variant) => variantIsLow(p, variant));
+  const cheapest = [...activeVariants].sort((a, b) => a.price - b.price)[0];
+  const comparison = cheapest ? variantComparison(p, cheapest) : undefined;
+  const saving = cheapest ? variantSavings(p, cheapest) : { amount: 0, percent: 0 };
+
   return (
-    <article className="group relative flex flex-col transition duration-300 ease-out hover:-translate-y-1">
-      <Link to={`/product/${p.slug}`} className="relative block aspect-square overflow-hidden rounded-2xl bg-white ring-1 ring-stone-200/80">
+    <article className="group relative flex min-w-0 flex-col transition duration-300 ease-out hover:-translate-y-1">
+      <Link to={`/product/${p.slug}`} className="relative block aspect-square overflow-hidden rounded-[18px] bg-[#efede8]">
         <ResponsiveImage src={p.images[0]} alt={p.name} loading="lazy" width={400} height={400} sizes="(max-width: 639px) 50vw, (max-width: 1023px) 33vw, 25vw"
           className="h-full w-full object-cover transition duration-500 ease-out group-hover:scale-[1.04]" />
-        <div className="absolute left-2.5 top-2.5 flex flex-col gap-1.5">
-          {hasDiscount && <span className="w-fit rounded-full bg-stone-900 px-2 py-0.5 text-[10px] font-bold text-white">Save {Math.round((1 - p.price / p.mrp!) * 100)}%</span>}
-          {p.stock > 0 && p.stock < lowAt && <span className="w-fit rounded-full bg-white/95 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-200">Only {p.stock} left</span>}
-        </div>
-        <div className="absolute right-2.5 top-2.5"><PayBadge pay={p.pay} compact /></div>
-        {p.stock === 0 && <div className="absolute inset-0 grid place-items-center bg-white/55 backdrop-blur-[1px]"><span className="rounded-full bg-white px-3 py-1 text-[11px] font-bold ring-1 ring-stone-300">Sold out</span></div>}
+        {p.original && (
+          <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-md bg-[#e5f0e5] px-2 py-1 text-[10px] font-bold leading-none text-[#275e43]">
+            <Icon name="check-circle" className="h-3 w-3" />Original
+          </span>
+        )}
+        {!available && <div className="absolute inset-0 grid place-items-center bg-white/55 backdrop-blur-[1px]"><span className="rounded-full bg-stone-900 px-3 py-1.5 text-[11px] font-semibold text-white">Sold out</span></div>}
       </Link>
-      <div className="flex flex-1 flex-col pt-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400">{categoryLabel(p.category)}</span>
-          <Stars r={p.rating} n={p.reviews} />
+
+      <div className="flex min-w-0 flex-1 flex-col pt-3">
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <span className="min-w-0 truncate text-[10.5px] font-medium text-stone-500">{categoryLabel(p.category)}</span>
+          <span aria-label={`Rated ${p.rating.toFixed(1)} out of 5, ${p.reviews} reviews`} title={`${p.rating.toFixed(1)} · ${p.reviews} reviews`} className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-stone-700">
+            <Icon name="star" className="h-3 w-3 text-amber-500" />{p.rating.toFixed(1)}
+          </span>
         </div>
-        <Link to={`/product/${p.slug}`} className="mt-1 line-clamp-2 text-[13.5px] font-semibold leading-snug text-stone-900 transition hover:text-stone-600 sm:text-sm">
+        <Link to={`/product/${p.slug}`} className="mt-1.5 line-clamp-2 min-h-[2.45rem] text-[13.5px] font-semibold leading-[1.4] text-stone-900 transition hover:text-stone-600 sm:text-sm">
           {p.name}
         </Link>
-        <div className="mt-auto flex items-end justify-between gap-2 pt-2.5">
-          <div className="min-w-0 leading-tight">
-            <span className="text-[15px] font-extrabold tnum">{fmt(p.price)}</span>
-            {hasDiscount && <span className="ml-1.5 text-[11px] text-stone-400 line-through tnum">{fmt(p.mrp!)}</span>}
+
+        <div className="mt-auto grid min-h-11 grid-cols-[minmax(0,1fr)_40px] items-end gap-x-2 pt-2">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 leading-tight">
+            {hasOptions && <span className="text-[10px] font-medium text-stone-500">From</span>}
+            <span className="min-w-0 text-[15px] font-extrabold tracking-tight text-stone-900 tnum [overflow-wrap:anywhere]">{fmt(p.price)}</span>
+            {comparison && <span className="min-w-0 text-[11px] text-stone-400 line-through tnum [overflow-wrap:anywhere]">{fmt(comparison)}</span>}
           </div>
-          <button onClick={(e) => { add(p.slug); flyToCart(e.currentTarget.closest("article")?.querySelector("img") ?? null, p.images[0]); }} disabled={!p.stock} aria-label={`Add ${p.name} to cart`}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-stone-100 text-stone-900 ring-1 ring-stone-200/80 transition duration-200 hover:bg-stone-900 hover:text-white active:scale-90 disabled:cursor-not-allowed disabled:opacity-40">
-            <Icon name="plus" className="h-[18px] w-[18px]" />
+          <button type="button" onClick={(e) => { if (hasOptions) { go(`/product/${p.slug}`); return; } if (add(p.slug)) flyToCart(e.currentTarget.closest("article")?.querySelector("img") ?? null, p.images[0]); }} disabled={!available} aria-label={hasOptions ? `Choose options for ${p.name}` : `Add ${p.name} to cart`}
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eeece7] text-stone-800 transition duration-200 hover:bg-stone-900 hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">
+            <Icon name="plus" className="h-4 w-4" />
           </button>
+        </div>
+        <div className="mt-1.5 flex min-h-[15px] flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-medium leading-tight">
+          {available && someLow && <span className="inline-flex min-w-0 items-center gap-1 text-[#a36525]"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#d99b42]" />Low stock</span>}
+          {saving.amount > 0 && <span className="text-[#527455]">Save {fmt(saving.amount)}</span>}
+          {hasOptions && <span className="text-stone-500">{activeVariants.length} options</span>}
         </div>
       </div>
     </article>
@@ -147,12 +165,20 @@ type Opt = { id: string; href: string; kind: "product" | "category" | "all" };
  * Results appear as you type; arrow keys, Enter and Escape all work, and
  * choosing a row saves the term to recent searches.
  */
-export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
+export function SmartSearch({
+  variant = "desktop",
+  autoFocus = false,
+  onClose,
+}: {
+  variant?: "desktop" | "mobile" | "header";
+  autoFocus?: boolean;
+  onClose?: () => void;
+}) {
   const { go, search } = useRouter();
   const { visibleProducts, visibleCategories, categoryLabel, settings } = useStore();
   const urlQ = search.get("q") ?? "";
   const [q, setQ] = useState(urlQ);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(autoFocus);
   const [active, setActive] = useState(-1);
   const [recent, setRecent] = useState<string[]>(() => readRecent());
   const box = useRef<HTMLDivElement>(null);
@@ -162,14 +188,25 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
 
   useEffect(() => { setQ(urlQ); }, [urlQ]);
 
+  useEffect(() => {
+    if (autoFocus) {
+      setOpen(true);
+      requestAnimationFrame(() => input.current?.focus());
+    }
+  }, [autoFocus]);
+
   const results = useMemo(() => searchCatalog(q, 6, visibleProducts, visibleCategories), [q, visibleProducts, visibleCategories]);
   const options = useMemo<Opt[]>(() => {
     const out: Opt[] = [];
+    if (!terms.length) {
+      visibleCategories.forEach(category => out.push({ id: `${listId}-cat-${category.slug}`, href: `/shop/${category.slug}`, kind: "category" }));
+      return out;
+    }
     results.products.forEach((h, i) => out.push({ id: `${listId}-p${i}`, href: `/product/${h.product.slug}`, kind: "product" }));
     results.categories.forEach((c, i) => out.push({ id: `${listId}-c${i}`, href: `/shop/${c.slug}`, kind: "category" }));
-    if (terms.length) out.push({ id: `${listId}-all`, href: `/shop?q=${encodeURIComponent(q.trim())}`, kind: "all" });
+    out.push({ id: `${listId}-all`, href: `/shop?q=${encodeURIComponent(q.trim())}`, kind: "all" });
     return out;
-  }, [results, terms.length, q, listId]);
+  }, [results, terms.length, q, listId, visibleCategories]);
 
   const remember = (term: string) => {
     const t = term.trim();
@@ -183,6 +220,7 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
     remember(term ?? q);
     setOpen(false);
     setActive(-1);
+    onClose?.();
     go(href);
   };
 
@@ -193,6 +231,7 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
     const term = q.trim();
     remember(term);
     setOpen(false);
+    onClose?.();
     go(term ? `/shop?q=${encodeURIComponent(term)}` : "/shop");
   };
 
@@ -202,9 +241,15 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
     else if (e.key === "Home" && open && options.length) { e.preventDefault(); setActive(0); }
     else if (e.key === "End" && open && options.length) { e.preventDefault(); setActive(options.length - 1); }
     else if (e.key === "Escape") {
-      if (open) { e.preventDefault(); setOpen(false); setActive(-1); }
-      else if (q) { setQ(""); }
-      input.current?.focus();
+      e.preventDefault();
+      if (q) {
+        setQ("");
+        input.current?.focus();
+      } else {
+        setOpen(false);
+        setActive(-1);
+        onClose?.();
+      }
     }
   };
 
@@ -226,19 +271,6 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
     else if (row.bottom > viewport.bottom) list.scrollTop += row.bottom - viewport.bottom;
   }, [active, options]);
 
-  // "/" or Ctrl/Cmd+K jumps to search from anywhere on the page.
-  useEffect(() => {
-    if (variant !== "desktop") return;
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
-      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) { e.preventDefault(); input.current?.focus(); setOpen(true); }
-      else if (e.key === "/" && !typing) { e.preventDefault(); input.current?.focus(); setOpen(true); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [variant]);
-
   const rowBase = "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors";
   const isActive = (i: number) => active === i;
   let cursor = 0;
@@ -253,7 +285,7 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
     }}>
       <form role="search" onSubmit={submit} className="w-full">
         <label htmlFor={`search-${variant}`} className="sr-only">Search products by name, SKU or keyword</label>
-        <div className={`flex items-center gap-2 rounded-full border bg-[#f4f1ea] transition focus-within:border-stone-900 focus-within:bg-white ${open ? "border-stone-900 bg-white" : "border-stone-200"} ${variant === "desktop" ? "px-4 py-2" : "px-4 py-2.5"}`}>
+        <div className={`flex items-center gap-2.5 rounded-full border bg-[#f4f1ea] px-4 py-2.5 transition focus-within:border-stone-900 focus-within:bg-white ${open ? "border-stone-900 bg-white shadow-sm" : "border-stone-200"}`}>
           <Icon name="search" className="h-4 w-4 shrink-0 text-stone-500" />
           <input
             id={`search-${variant}`}
@@ -269,16 +301,26 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
             onChange={(e) => { setQ(e.target.value); setOpen(true); setActive(-1); }}
             onFocus={() => setOpen(true)}
             onKeyDown={onKeyDown}
-            placeholder={variant === "desktop" ? "Search parts, kits or SKU…" : "Search 18650, TP4056, kits…"}
+            placeholder="Search 18650 cells, TP4056, car LEDs, kits or SKU…"
             className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-stone-500"
           />
           {q ? (
             <button type="button" onClick={() => { setQ(""); input.current?.focus(); }} aria-label="Clear search" className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-stone-200 text-stone-600 hover:bg-stone-300">
               <Icon name="close" className="h-3 w-3" />
             </button>
-          ) : variant === "desktop" ? (
-            <kbd className="hidden shrink-0 rounded border border-stone-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-stone-500 lg:block">/</kbd>
-          ) : null}
+          ) : (
+            <kbd className="hidden shrink-0 rounded border border-stone-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-stone-500 sm:block">ESC</kbd>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Hide search bar"
+              className="ml-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full text-stone-500 transition hover:bg-stone-200 hover:text-stone-900"
+            >
+              <Icon name="close" className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </form>
 
@@ -286,7 +328,7 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
         <>
           <div className="pointer-events-none fixed inset-0 z-40 bg-stone-900/20 md:bg-stone-900/10" aria-hidden="true" />
           <div
-            className={`panel-in absolute z-50 overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-2xl shadow-stone-900/15 ${variant === "desktop" ? "top-[calc(100%+8px)] left-0 w-[min(560px,calc(100vw-2rem))]" : "top-[calc(100%+6px)] inset-x-0 max-h-[min(72vh,560px)] overflow-y-auto"}`}
+            className="panel-in absolute inset-x-0 top-[calc(100%+8px)] z-50 max-h-[min(72vh,560px)] overflow-y-auto overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-2xl shadow-stone-900/15"
           >
             <div id={listId} role="listbox" aria-label="Search results" className="max-h-[min(72vh,560px)] overflow-y-auto">
               {/* nothing typed yet */}
@@ -357,6 +399,7 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
                       <div className="grid gap-0.5">
                         {results.products.map((h, i) => {
                           const p = h.product;
+                          const hasOptions = getVariants(p).filter((variant) => variant.enabled !== false).length > 1;
                           const optIndex = cursor++;
                           return (
                             <button key={p.slug} type="button" id={`${listId}-p${i}`} role="option" aria-selected={isActive(optIndex)}
@@ -365,7 +408,7 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
                               style={{ ["--i" as string]: i } as React.CSSProperties}>
                               <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-sand">
                                 <ResponsiveImage src={p.images[0]} alt="" loading="lazy" sizes="44px" className="h-full w-full object-cover" />
-                                {p.stock === 0 && <span className="absolute inset-0 bg-white/60" />}
+                                {!productAvailable(p) && <span className="absolute inset-0 bg-white/60" />}
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="line-clamp-2 text-[13px] font-semibold leading-snug"><Highlight text={p.name} terms={terms} /></span>
@@ -373,13 +416,13 @@ export function SmartSearch({ variant }: { variant: "desktop" | "mobile" }) {
                                   <span>{categoryLabel(p.category)}</span><span className="h-2.5 w-px bg-stone-300" />
                                   <span className="font-mono">{p.sku}</span>
                                   {results.exactSku?.slug === p.slug && <span className="rounded bg-stone-900 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white">Exact SKU</span>}
-                                  {p.stock > 0 && p.stock < (p.lowStockAt ?? 10) && <span className="font-bold text-amber-700">Only {p.stock} left</span>}
-                                  {p.stock === 0 && <span className="font-semibold text-stone-400">Sold out</span>}
+                                  {productAvailable(p) && p.stock < (p.lowStockAt ?? 5) && <span className="font-bold text-amber-700">Only {p.stock} left</span>}
+                                  {!productAvailable(p) && <span className="font-semibold text-stone-400">Sold out</span>}
                                 </span>
                               </span>
                               <span className="flex shrink-0 flex-col items-end gap-1">
-                                <span className="text-[13px] font-extrabold tnum">{fmt(p.price)}</span>
-                                <PayBadge pay={p.pay} compact />
+                                <span className="text-[13px] font-extrabold tnum">{hasOptions ? "From " : ""}{fmt(p.price)}</span>
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-stone-500"><Icon name="star" className="h-2.5 w-2.5 text-amber-500" />{p.rating.toFixed(1)}</span>
                               </span>
                             </button>
                           );
@@ -450,6 +493,7 @@ export function Header() {
   const { path } = useRouter();
   const { openCart } = useCartPanel();
   const [open, setOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [bumpKey, setBumpKey] = useState(0);
   const menuTrigger = useRef<HTMLButtonElement>(null);
@@ -459,6 +503,22 @@ export function Header() {
     () => visibleCategories.map((c) => [c.name, `/shop/${c.slug}`, c.icon ?? CATEGORY_ICON[c.slug] ?? "box"] as const),
     [visibleCategories],
   );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setSearchOpen(true);
+      } else if (e.key === "/" && !typing) {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 6);
@@ -509,13 +569,28 @@ export function Header() {
       </div>
       <header className={`sticky top-0 z-40 border-b border-stone-200/90 bg-white/95 backdrop-blur-md transition-shadow duration-300 ${scrolled ? "shadow-[0_10px_30px_-18px_rgba(24,24,20,0.45)]" : ""}`}>
         <div className="shell">
-          <div className="flex h-[62px] items-center gap-3">
+          <div className="flex h-[62px] items-center gap-2 sm:gap-3">
             <button ref={menuTrigger} onClick={() => setOpen(true)} className="-ml-2 grid h-10 w-10 shrink-0 place-items-center rounded-full text-stone-700 hover:bg-stone-100 lg:hidden" aria-label="Open menu" aria-expanded={open}>
               <Icon name="menu" />
             </button>
             <Link to="/" scroll="top" aria-label="Glowing Space BD home" className="shrink-0"><Logo /></Link>
-            <div className="ml-2 hidden max-w-md flex-1 md:block"><SmartSearch variant="desktop" /></div>
-            <nav className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2" aria-label="Account">
+
+            <nav className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2" aria-label="Account">
+              <button
+                type="button"
+                onClick={() => setSearchOpen((v) => !v)}
+                aria-label={searchOpen ? "Close search" : "Open search"}
+                aria-expanded={searchOpen}
+                aria-controls="header-search-panel"
+                className={`flex items-center gap-2 rounded-full px-2.5 py-2 text-xs font-semibold transition sm:px-3 ${
+                  searchOpen
+                    ? "bg-stone-900 text-white shadow-sm"
+                    : "text-stone-700 ring-1 ring-stone-200/80 hover:bg-stone-100 hover:ring-stone-300"
+                }`}
+              >
+                <Icon name={searchOpen ? "close" : "search"} className="h-[18px] w-[18px]" />
+                <span className="hidden sm:inline">{searchOpen ? "Close" : "Search"}</span>
+              </button>
               <Link to="/track" className="hidden items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 lg:flex">
                 <Icon name="box" className="h-[18px] w-[18px]" /><span>Track</span>
               </Link>
@@ -530,7 +605,13 @@ export function Header() {
               </button>
             </nav>
           </div>
-          <div className="pb-3 md:hidden"><SmartSearch variant="mobile" /></div>
+          {searchOpen && (
+            <div id="header-search-panel" className="panel-in border-t border-stone-100 py-3">
+              <div className="mx-auto max-w-2xl">
+                <SmartSearch variant="header" autoFocus onClose={() => setSearchOpen(false)} />
+              </div>
+            </div>
+          )}
         </div>
         <div className="hidden border-t border-stone-100 lg:block">
           <nav aria-label="Categories" className="shell flex h-11 items-center gap-1 overflow-x-auto no-scrollbar">
@@ -671,13 +752,8 @@ export function Footer() {
           </div>
         </div>
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-stone-500">Payments & delivery</p>
-          <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
-            {settings.enableBkash && <span className="rounded-lg bg-pink-600 px-2.5 py-1.5 text-white">bKash</span>}
-            {settings.enableNagad && <span className="rounded-lg bg-orange-500 px-2.5 py-1.5 text-white">Nagad</span>}
-            {settings.enableCod && <span className="rounded-lg bg-white px-2.5 py-1.5 text-stone-900">Cash on Delivery</span>}
-          </div>
-          <p className="mt-3 text-xs leading-relaxed text-stone-400">Pathao & Steadfast courier.<br />Dhaka 1–2 days ({fmt(settings.dhakaDeliveryFee)}) · Nationwide 2–4 days ({fmt(settings.outsideDeliveryFee)}).</p>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-stone-500">Delivery</p>
+          <p className="mt-3 text-xs leading-relaxed text-stone-400">Pathao & Steadfast courier.<br />Inside Dhaka {fmt(settings.dhakaDeliveryFee)} · outside Dhaka {fmt(settings.outsideDeliveryFee)}.<br />Dhaka 1–2 days · nationwide 2–4 days{settings.freeDhakaThreshold > 0 ? ` · free Dhaka delivery over ${fmt(settings.freeDhakaThreshold)}` : ""}.</p>
         </div>
       </div>
       <div className="border-t border-white/10">

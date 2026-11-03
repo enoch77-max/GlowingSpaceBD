@@ -11,7 +11,7 @@ export function VaultSection() {
   const [filter, setFilter] = useState("all");
   const [rotating, setRotating] = useState<SecretDescriptor | null>(null);
   if (!can("secrets.manage")) return null;
-  const backend = Boolean(import.meta.env.VITE_ADMIN_API_URL);
+  const backend = Boolean(process.env.NEXT_PUBLIC_ADMIN_API_URL);
   const list = secretsMeta.filter(s => filter === "all" || s.group === filter);
   return <div><PageHeading title="Vault" description="Manage integration credentials." />
     {!backend && <div className="admin-inline-notice mb-5"><Icon name="info" className="h-4 w-4" /><span>Backend not connected. Credential updates are unavailable in this frontend demo.</span></div>}

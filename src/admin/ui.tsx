@@ -33,7 +33,7 @@ export function Overlay({ title, subtitle, onClose, children, footer, headerActi
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
-  close.current = onClose;
+  useEffect(() => { close.current = onClose; }, [onClose]);
   const id = useId();
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;

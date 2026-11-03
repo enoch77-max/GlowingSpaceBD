@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, usePageState, useRouter } from "../router";
 import { useStore } from "../store";
 import { fmt, type Product } from "../data";
-import { ProductCard, Crumbs, btnPrimary, btnAccent, btnGhost, SectionHead, QtyStepper } from "../components";
+import { ProductCard, Crumbs, btnPrimary, btnGhost, SectionHead, QtyStepper } from "../components";
 import { CATEGORY_ICON, Icon, type IconName } from "../icons";
+import { getVariants, productAvailable, inventoryMode, lineVariant, maxVariantQuantity, variantComparison, variantIsLow, variantSavings, variantStock } from "../catalog/inventory";
+import { useDeliveryRegion } from "../hooks/useDeliveryRegion";
 import { useSeo, breadcrumbLd, SITE } from "../seo";
 import { Select } from "../ui/Select";
 import { ResponsiveImage } from "../ResponsiveImage";
@@ -13,7 +15,7 @@ import { search as searchCatalog } from "../search";
 /* ============================= CATALOG ============================= */
 
 const PRICES: [string, number, number][] = [["Any price", 0, Infinity], ["Under ৳200", 0, 200], ["৳200 – ৳1,000", 200, 1000], ["Over ৳1,000", 1000, Infinity]];
-const chip = (on: boolean) => `shrink-0 rounded-full px-4 py-2 text-xs font-bold transition ${on ? "bg-stone-900 text-white" : "bg-white text-stone-700 ring-1 ring-stone-200 hover:ring-stone-400"}`;
+const chip = (on: boolean) => `shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition ${on ? "bg-stone-900 text-white" : "bg-[#f2f1ed] text-stone-600 hover:bg-[#eae8e1] hover:text-stone-900"}`;
 
 export function Catalog({ category }: { category?: string }) {
   const { search, go } = useRouter();
@@ -48,7 +50,7 @@ export function Catalog({ category }: { category?: string }) {
     const [, lo, hi] = PRICES[price];
     const matching = q ? searchCatalog(q, visibleProducts.length, visibleProducts, visibleCategories).products.map((hit) => hit.product) : visibleProducts;
     const r = matching.filter((p) => (!category || p.category === category)
-      && p.price >= lo && p.price < hi && (!inStock || p.stock > 0) && (!codOnly || p.pay === "cod"));
+      && p.price >= lo && p.price < hi && (!inStock || productAvailable(p)) && (!codOnly || p.pay === "cod"));
     if (sort === "low") r.sort((a, b) => a.price - b.price);
     else if (sort === "high") r.sort((a, b) => b.price - a.price);
     else if (!q) r.sort((a, b) => b.reviews - a.reviews);
@@ -167,7 +169,7 @@ export function Catalog({ category }: { category?: string }) {
 
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <button ref={filterTrigger} type="button" onClick={() => setDrawer(true)} className="flex items-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-2 text-xs font-bold lg:hidden">
+            <button ref={filterTrigger} type="button" onClick={() => setDrawer(true)} className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-stone-800 transition hover:bg-stone-100 lg:hidden">
               <Icon name="sliders" className="h-4 w-4" />Filters{activeCount > 0 && <span className="grid h-4 min-w-4 place-items-center rounded-full bg-stone-900 px-1 text-[9px] text-white">{activeCount}</span>}
             </button>
             <div className="hidden flex-wrap items-center gap-1.5 sm:flex">
@@ -242,14 +244,15 @@ function specIcon(label: string): IconName {
 }
 
 export function ProductPage({ slug }: { slug: string }) {
-  const { add, findProduct, visibleProducts, categoryLabel, settings } = useStore();
+  const { add, selectForCheckout, cart, catalogReady, findProduct, visibleProducts, categoryLabel, settings } = useStore();
   const p = findProduct(slug);
   const { go, back, previous } = useRouter();
   const [img, setImg] = usePageState(`${slug}:image`, 0);
   const [qty, setQty] = usePageState(`${slug}:quantity`, 1);
+  const [selectedVariant, setSelectedVariant] = usePageState(`${slug}:variant-id`, "");
+  const { region: deliveryRegion } = useDeliveryRegion();
   const [tab, setTab] = usePageState<Tab>(`${slug}:tab`, "overview");
   const mainImg = useRef<HTMLImageElement>(null);
-  const [added, setAdded] = useState(false);
   const crumbs: [string, string][] = p ? [["Home", "/"], [categoryLabel(p.category), `/shop/${p.category}`], [p.name, `/product/${p.slug}`]] : [];
   useSeo({
     title: p?.name ?? "Product not found", description: p ? `${p.short} ${fmt(p.price)} — buy online in Bangladesh.` : "", image: p?.images[0], path: `/product/${slug}`,
@@ -262,28 +265,46 @@ export function ProductPage({ slug }: { slug: string }) {
   if (!p) return <div className="py-32 text-center"><h1 className="text-2xl font-extrabold">Product not found</h1><Link to="/shop" className={`${btnPrimary} mt-4`}>Back to shop</Link></div>;
 
   const related = visibleProducts.filter((x) => x.category === p.category && x.slug !== p.slug).slice(0, 4);
-  const packSizes = p.price > 800 ? [1, 2, 3] : [1, 3, 5];
-  const packs = packSizes.map((units) => ({ units, total: p.price * units, available: p.stock >= units }));
-  const bestPack = Math.max(0, ...packs.filter((o) => o.available && o.units > 1).map((o) => o.units));
-  const lowStock = p.stock > 0 && p.stock < (p.lowStockAt ?? 12);
-  const saveAmount = p.mrp && p.mrp > p.price ? p.mrp - p.price : 0;
-  const eta = new Date(Date.now() + 2 * 864e5).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-  const isCod = p.pay === "cod";
+  const mode = inventoryMode(p);
+  const isPack = mode === "shared_units";
+  const packs = getVariants(p).filter(v => v.enabled !== false).map(v => ({
+    ...v, units: v.unitsPerPack, stock: variantStock(p, v), savings: variantSavings(p, v), comparison: variantComparison(p, v), available: maxVariantQuantity(cart, p, v) > 0,
+  }));
+  const selectedOption = packs.find(v => v.id === selectedVariant) ?? packs.find(v => v.stock > 0) ?? packs[0];
+  const maxQty = maxVariantQuantity(cart, p, selectedOption);
+  const quantity = Math.max(1, Math.min(Number.isInteger(qty) ? qty : 1, Math.max(1, maxQty)));
+  const selectedTotal = selectedOption.price * quantity;
+  const cartLine = cart.find(line => line.slug === p.slug && lineVariant(p, line)?.id === selectedOption.id);
+  const selectedInCart = cart.filter(line => line.slug === p.slug && lineVariant(p, line)?.id === selectedOption.id).reduce((sum, line) => sum + line.qty, 0);
+  const canAdd = selectedInCart + quantity <= maxQty;
+  const lowStock = variantIsLow(p, selectedOption);
+  const lowStockCount = mode === "independent" ? selectedOption.stock : p.stock;
+  const saveAmount = selectedOption.savings.amount;
+  const qualityNote = p.original ? "" : p.qualityNote?.trim() ?? "";
+  const deliverDays = deliveryRegion === "dhaka" ? 2 : 4;
+  const etaBy = new Date(Date.now() + deliverDays * 864e5).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  const feeHere = deliveryRegion === "dhaka" ? settings.dhakaDeliveryFee : settings.outsideDeliveryFee;
+  const freeHere = deliveryRegion === "dhaka" && settings.freeDhakaThreshold > 0 && selectedTotal >= settings.freeDhakaThreshold;
   const showReviews = () => {
     setTab("reviews");
     requestAnimationFrame(() => document.getElementById("product-details")?.scrollIntoView({ block: "start", behavior: "instant" }));
   };
   const backLabel = previous?.startsWith("/shop") ? "Results" : previous === "/cart" ? "Cart" : previous === "/" ? "Home" : null;
+  const chooseVariant = (id: string) => {
+    const next = packs.find(v => v.id === id)!;
+    const nextMax = maxVariantQuantity(cart, p, next);
+    setSelectedVariant(id);
+    if (nextMax > 0 && quantity > nextMax) setQty(nextMax);
+  };
   const addWithFx = () => {
-    if (!p.stock) return;
-    add(p.slug, qty);
-    flyToCart(mainImg.current, p.images[0]);
-    setAdded(true);
-    window.setTimeout(() => setAdded(false), 1600);
+    if (add(p.slug, quantity, selectedOption.id)) flyToCart(mainImg.current, p.images[0]);
+  };
+  const buyNow = () => {
+    if (selectForCheckout(p.slug, quantity, selectedOption.id)) go("/checkout");
   };
 
   return (
-    <div className="pb-24 md:pb-0">
+    <div className="pb-36 lg:pb-24">
       <div className="shell pt-4 sm:pt-5">
         <div className="flex items-start justify-between gap-3">
           <Crumbs items={crumbs} />
@@ -293,14 +314,11 @@ export function ProductPage({ slug }: { slug: string }) {
         <div className="mt-1 grid gap-6 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] lg:gap-10 xl:gap-14">
           {/* Gallery */}
           <div className="min-w-0">
-            <div className="relative overflow-hidden rounded-[20px] bg-white ring-1 ring-stone-200/80">
+            <div className="relative overflow-hidden rounded-[20px] bg-[#efede8]">
               <ResponsiveImage key={img} ref={mainImg} src={p.images[img] ?? p.images[0]} alt={p.name} width={900} height={900} sizes="(max-width: 1023px) 100vw, 55vw" className="anim-fade aspect-[4/3.2] w-full object-cover" />
-              <div className="absolute left-3.5 top-3.5 flex flex-col items-start gap-1.5">
-                {saveAmount > 0 && <span className="rounded-lg bg-amber-400 px-2.5 py-1 text-[11px] font-extrabold text-stone-900 shadow-sm">Save {fmt(saveAmount)}</span>}
-                {lowStock && <span className="rounded-lg bg-white/95 px-2.5 py-1 text-[11px] font-bold text-amber-800 shadow-sm ring-1 ring-amber-200">Only {p.stock} left</span>}
-              </div>
+              {p.original && <span className="absolute left-3.5 top-3.5 inline-flex items-center gap-1.5 rounded-md bg-[#e5f0e5] px-2.5 py-1.5 text-[11px] font-bold leading-none text-[#275e43]"><Icon name="check-circle" className="h-3.5 w-3.5" />Original</span>}
               {p.images.length > 1 && <span className="absolute bottom-3.5 right-3.5 rounded-md bg-stone-900/70 px-2 py-0.5 font-mono text-[10px] font-semibold text-white tnum">{img + 1} / {p.images.length}</span>}
-              {p.stock === 0 && <div className="absolute inset-0 grid place-items-center bg-white/60"><span className="rounded-full bg-stone-900 px-4 py-1.5 text-xs font-bold text-white">Out of stock</span></div>}
+              {!productAvailable(p) && <div className="absolute inset-0 grid place-items-center bg-white/60"><span className="rounded-full bg-stone-900 px-4 py-1.5 text-xs font-bold text-white">Out of stock</span></div>}
             </div>
             {p.images.length > 1 && (
               <div className="no-scrollbar mt-2.5 flex gap-2 overflow-x-auto pb-0.5">
@@ -314,84 +332,106 @@ export function ProductPage({ slug }: { slug: string }) {
             )}
           </div>
 
-          {/* Buy panel */}
-          <div className="min-w-0 lg:sticky lg:top-[104px] lg:self-start">
-            <Link to={`/shop/${p.category}`} className="text-[11px] font-bold uppercase tracking-[0.14em] text-stone-500 transition hover:text-stone-900">{categoryLabel(p.category)}</Link>
-            <h1 className="mt-1.5 text-balance text-[26px] font-extrabold leading-[1.06] tracking-tight sm:text-[32px]">{p.name}</h1>
-            <button type="button" onClick={showReviews} className="mt-2 inline-flex items-center gap-1.5" aria-label={`Rated ${p.rating} from ${p.reviews} reviews. Read reviews.`}>
-              <span className="flex gap-px text-amber-500" aria-hidden="true">{Array.from({ length: 5 }).map((_, i) => <Icon key={i} name="star" className={`h-3.5 w-3.5 ${i < Math.round(p.rating) ? "" : "text-stone-300"}`} />)}</span>
-              <span className="text-[13px] font-bold text-stone-800 tnum">{p.rating.toFixed(1)}</span>
-              <span className="text-[13px] text-stone-400 underline decoration-stone-300 underline-offset-2">{p.reviews} reviews</span>
+          {/* Product information and pack choices */}
+          <div className="min-w-0 rounded-[24px] bg-white p-5 sm:p-6 lg:p-7">
+            <Link to={`/shop/${p.category}`} className="inline-flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.16em] text-stone-500 transition hover:text-stone-900">
+              <span className="grid h-6 w-6 place-items-center rounded-lg bg-amber-50 text-amber-700"><Icon name={CATEGORY_ICON[p.category] ?? "box"} className="h-3.5 w-3.5" /></span>
+              {categoryLabel(p.category)}
+            </Link>
+
+            <h1 className="mt-3 text-[24px] font-extrabold leading-[1.13] tracking-[-0.035em] text-stone-900 sm:text-[30px]">{p.name}</h1>
+            <button type="button" onClick={showReviews} className="mt-2.5 inline-flex items-center gap-2 text-left" aria-label={`Rated ${p.rating} from ${p.reviews} reviews. Read reviews.`}>
+              <span className="flex gap-0.5 text-amber-500" aria-hidden="true">{Array.from({ length: 5 }).map((_, i) => <Icon key={i} name="star" className={`h-3.5 w-3.5 ${i < Math.round(p.rating) ? "" : "text-stone-300"}`} />)}</span>
+              <span className="text-[12px] font-bold text-stone-900 tnum">{p.rating.toFixed(1)}</span>
+              <span className="text-[12px] font-medium text-stone-500 underline decoration-stone-300 underline-offset-4">{p.reviews} reviews</span>
             </button>
-            <p className="mt-2.5 max-w-md text-[13.5px] leading-relaxed text-stone-600">{p.short}</p>
 
-            <div className="mt-3.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-[30px] font-extrabold leading-none tracking-tight tnum sm:text-[34px]">{fmt(p.price)}</span>
-              {p.mrp && p.mrp > p.price && <span className="text-[15px] text-stone-400 line-through tnum">{fmt(p.mrp)}</span>}
-            </div>
-
-            {/* Variant: pack size */}
-            <div className="mt-4">
-              <div className="mb-2 flex items-baseline justify-between">
-                <span className="text-xs font-bold text-stone-800">Pack size</span>
-                <span className="text-[11px] text-stone-500 tnum">{fmt(p.price)} / pc</span>
+            <div className="mt-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-3 border-t border-stone-100 pt-4">
+              <div className="min-w-0" aria-live="polite">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span className="text-[30px] font-extrabold leading-none tracking-[-0.04em] text-stone-900 tnum sm:text-[34px]">{fmt(selectedOption.price)}</span>
+                  {selectedOption.comparison && <span className="text-[13px] text-stone-400 line-through tnum">{fmt(selectedOption.comparison)}</span>}
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium">
+                  <span className="text-stone-500">{isPack ? `Per pack · ${fmt(selectedOption.price / selectedOption.units)} per ${p.category === "batteries" ? "cell" : "piece"}` : `Price for ${selectedOption.label}`}</span>
+                  {saveAmount > 0 && <span className="font-semibold text-[#527455]">Save {fmt(saveAmount)}</span>}
+                </div>
               </div>
-              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Pack size">
-                {packs.map((o) => {
-                  const active = qty === o.units;
+              {selectedOption.stock === 0 ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-stone-500"><span className="h-1.5 w-1.5 rounded-full bg-stone-400" />Out of stock</span>
+              ) : lowStock ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#a36525]"><span className="h-1.5 w-1.5 rounded-full bg-[#d99b42]" />Low stock · {lowStockCount} left</span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#527455]"><span className="h-1.5 w-1.5 rounded-full bg-[#78a579]" />In stock</span>
+              )}
+            </div>
+            <p className="mt-3 max-w-md text-[13px] leading-relaxed text-stone-600">{p.short}</p>
+
+            {/* Pack size is independent of the quantity selected in the bottom bar. */}
+            {mode !== "single" && <fieldset aria-label={isPack ? "Choose your pack" : "Choose a variant"} className="mt-5 border-t border-stone-100 pt-4">
+              <div className="mb-2.5 flex items-center justify-between gap-2">
+                <span className="text-[13px] font-bold text-stone-900">{isPack ? "Choose your pack" : "Choose a variant"}</span>
+                <span className="text-[11px] font-medium text-stone-500">Selected: <strong className="text-stone-800">{selectedOption.label}</strong></span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2">
+                {packs.map((option) => {
+                  const active = selectedOption.id === option.id;
                   return (
-                    <button key={o.units} type="button" role="radio" aria-checked={active} disabled={!o.available || !p.stock}
-                      onClick={() => setQty(o.units)}
-                      className={`relative rounded-xl px-2 py-2 text-center ring-1 transition disabled:cursor-not-allowed disabled:opacity-40 ${active ? "bg-stone-900 text-white ring-stone-900" : "bg-white text-stone-900 ring-stone-200 hover:ring-stone-400"}`}>
-                      {o.units === bestPack && !active && <Icon name="star" className="absolute right-1.5 top-1.5 h-3 w-3 text-amber-500" />}
-                      <span className="block text-[13px] font-extrabold leading-tight">{o.units === 1 ? "Single" : `${o.units}-pack`}</span>
-                      <span className={`mt-0.5 block text-[11px] tnum ${active ? "text-stone-300" : "text-stone-500"}`}>{fmt(o.total)}</span>
-                    </button>
+                    <label key={option.id} className={`relative flex min-w-0 cursor-pointer flex-col rounded-xl px-3 py-2.5 transition focus-within:ring-2 focus-within:ring-amber-600 focus-within:ring-offset-2 ${active ? "bg-[#fff2d5]" : "bg-[#f6f5f1] hover:bg-[#efede7]"} ${!option.available ? "cursor-not-allowed opacity-45" : ""}`}>
+                      <input type="radio" name={`variant-${slug}`} value={option.id} checked={active} disabled={!option.available || !catalogReady} onChange={() => chooseVariant(option.id)} className="sr-only" />
+                      <span className="flex min-w-0 items-start justify-between gap-2">
+                        <span className="min-w-0 break-words text-[11.5px] font-bold leading-tight text-stone-900">{option.label}</span>
+                        <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full ${active ? "bg-stone-900 text-white" : "bg-[#e4e2db]"}`}>
+                          {active && <Icon name="check" className="h-2.5 w-2.5" strokeWidth={3} />}
+                        </span>
+                      </span>
+                      <span className="mt-1.5 flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-0.5">
+                        <span className="min-w-0 text-[13px] font-extrabold leading-tight text-stone-900 tnum [overflow-wrap:anywhere]">{fmt(option.price)}</span>
+                        <span className="text-[10px] font-medium text-stone-500">/ {isPack ? "pack" : "item"}</span>
+                      </span>
+                      {option.savings.amount > 0 && <span className="mt-1 text-[10px] font-semibold leading-snug text-[#527455]">Save {fmt(option.savings.amount)} · {option.savings.percent}%</span>}
+                      {option.stock === 0 && <span className="mt-1 text-[10px] text-stone-500">Out of stock</span>}
+                    </label>
                   );
                 })}
               </div>
-            </div>
+              <p className="mt-2 flex items-center gap-1.5 text-[11px] leading-snug text-stone-500"><Icon name="info" className="h-3.5 w-3.5 text-stone-400" />{isPack ? `Includes ${selectedOption.units} ${p.category === "batteries" ? (selectedOption.units === 1 ? "cell" : "cells") : (selectedOption.units === 1 ? "piece" : "pieces")} per pack · quantity set below` : `${selectedOption.label} · quantity set below`}</p>
+            </fieldset>}
 
-            {/* Availability + delivery, one compact card */}
-            <div className="mt-4 divide-y divide-stone-100 rounded-2xl border border-stone-200 bg-white">
-              <div className="flex items-center gap-3 px-4 py-3">
-                <span className={`h-2 w-2 shrink-0 rounded-full ${p.stock === 0 ? "bg-stone-300" : lowStock ? "bg-amber-500" : "bg-emerald-500"}`} />
-                <p className="text-[13px] font-semibold text-stone-800">
-                  {p.stock === 0 ? "Out of stock" : lowStock ? `In stock — only ${p.stock} left` : "In stock, ready to ship"}
-                </p>
+            {/* Delivery: arrival summary first, then a clean comparison of both rates. */}
+            <section aria-label="Delivery information" className="mt-5 overflow-hidden rounded-2xl bg-[#f6f5f1]">
+              <div className="px-4 py-3.5">
+                <div className="flex items-center gap-3">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-stone-700"><Icon name="truck" className="h-[18px] w-[18px]" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-semibold uppercase leading-4 tracking-[0.08em] text-stone-500">Delivery</p>
+                    <p className="mt-0.5 text-[13px] font-semibold leading-5 text-stone-900">Order now, get it by <span className="whitespace-nowrap">{etaBy}</span></p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-[15px] font-extrabold leading-none text-stone-900 tnum">{freeHere ? "Free" : fmt(feeHere)}</p>
+                    <p className="mt-1 whitespace-nowrap text-[10px] font-medium leading-none text-stone-500">{deliveryRegion === "dhaka" ? "in Dhaka" : "outside Dhaka"}</p>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-x-4 border-t border-[#e8e5dc] pt-2.5">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-medium leading-4 text-stone-500">Inside Dhaka</p>
+                    <p className="mt-0.5 whitespace-nowrap text-[11px] font-semibold leading-4 text-stone-800">{fmt(settings.dhakaDeliveryFee)} <span className="font-normal text-stone-400">·</span> <span className="font-medium text-stone-500">1–2 days</span></p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-medium leading-4 text-stone-500">Outside Dhaka</p>
+                    <p className="mt-0.5 whitespace-nowrap text-[11px] font-semibold leading-4 text-stone-800">{fmt(settings.outsideDeliveryFee)} <span className="font-normal text-stone-400">·</span> <span className="font-medium text-stone-500">2–4 days</span></p>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-3 px-4 py-3">
-                <Icon name="truck-fast" className="h-5 w-5 shrink-0 text-stone-500" />
-                <p className="text-[13px] text-stone-600"><strong className="font-semibold text-stone-800">Get it by {eta}</strong> · Dhaka {fmt(settings.dhakaDeliveryFee)} · Outside {fmt(settings.outsideDeliveryFee)}, 2–4 days</p>
+              <div className="flex items-center justify-between gap-2 border-t border-[#e8e5dc] bg-white/60 px-4 py-2.5">
+                <span className="inline-flex items-center gap-2 text-[11.5px] font-semibold text-stone-800"><Icon name="return" className="h-4 w-4 text-emerald-700" />7-day returns</span>
+                <span className="shrink-0 text-[10px] font-medium text-stone-500">Ships from Dhaka</span>
               </div>
-              <div className="flex items-center gap-3 px-4 py-3">
-                <Icon name="return" className="h-5 w-5 shrink-0 text-stone-500" />
-                <p className="text-[13px] text-stone-600"><strong className="font-semibold text-stone-800">7-day returns</strong> · dead-on-arrival replaced free</p>
-              </div>
-            </div>
+            </section>
 
-            {/* Payment, icon-led, one line */}
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              {isCod
-                ? <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200"><Icon name="cash" className="h-3.5 w-3.5" />Cash on Delivery</span>
-                : <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-bold text-violet-800 ring-1 ring-violet-200"><Icon name="lock" className="h-3.5 w-3.5" />Advance payment</span>}
-              <span className="inline-flex items-center gap-1 rounded-full bg-pink-50 px-2.5 py-1 text-[11px] font-bold text-pink-700 ring-1 ring-pink-200">bKash</span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-[11px] font-bold text-orange-700 ring-1 ring-orange-200">Nagad</span>
-              <span className="w-full text-[11px] text-stone-500">{isCod ? "Pay the courier, or pay online in advance." : "Paid online before dispatch · refunded if undeliverable."}</span>
-            </div>
-
-            <div className="mt-4 flex items-center gap-2.5">
-              <QtyStepper qty={qty} setQty={setQty} max={Math.max(p.stock, 1)} />
-              <button disabled={!p.stock} className={`${btnPrimary} h-12 flex-1`} onClick={addWithFx} aria-live="polite"><Icon name={added ? "check" : "bag"} className="h-4 w-4" />{added ? "Added to cart" : "Add to cart"}</button>
-            </div>
-            <button disabled={!p.stock} className={`${btnAccent} mt-2.5 h-12 w-full`} onClick={() => { add(p.slug, qty); go("/checkout"); }}>Buy now{qty > 1 ? ` · ${fmt(p.price * qty)}` : ""}<Icon name="arrow-right" className="h-4 w-4" /></button>
-
-            <ul className="mt-5 grid grid-cols-3 gap-2 border-t border-stone-200 pt-4">
+            <ul className="mt-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-[10.5px] font-semibold text-stone-500">
               {[["beaker", "Bench tested"], ["shield", "Secure checkout"], ["headphones", "Maker support"]].map(([icon, label]) => (
-                <li key={label as string} className="flex flex-col items-center gap-1.5 py-1 text-center">
-                  <Icon name={icon as "beaker"} className="h-5 w-5 text-stone-500" />
-                  <span className="text-[11px] font-semibold leading-tight text-stone-600">{label as string}</span>
-                </li>
+                <li key={label} className="inline-flex items-center gap-1.5"><Icon name={icon as "beaker"} className="h-3.5 w-3.5 text-stone-500" />{label}</li>
               ))}
             </ul>
           </div>
@@ -410,33 +450,43 @@ export function ProductPage({ slug }: { slug: string }) {
 
           <div className="py-7">
             {tab === "overview" && (
-              <div className="grid max-w-4xl gap-8 md:grid-cols-[1.1fr_0.9fr] md:gap-12">
-                <div>
-                  <h2 className="text-base font-extrabold tracking-tight">Built for real benches</h2>
-                  <p className="mt-2 text-sm leading-relaxed text-stone-600">Checked in small batches, photographed as-shipped, and packed to survive the courier. If it arrives dead, we replace it — no forms, no argument.</p>
+              <div className="grid max-w-4xl gap-5 md:grid-cols-[0.9fr_1.1fr] md:gap-8">
+                <div className="space-y-3">
+                  {p.original ? (
+                    <div className="flex items-center gap-2 rounded-xl bg-[#edf4eb] px-3 py-2.5 text-[12px] font-bold text-[#275e43]"><Icon name="check-circle" className="h-4 w-4" />Original product</div>
+                  ) : qualityNote ? (
+                    <div className="rounded-xl bg-[#faf5e9] p-3">
+                      <p className="text-[9px] font-extrabold uppercase tracking-[0.13em] text-amber-800">Product quality</p>
+                      <p className="mt-1 text-[12px] font-semibold leading-relaxed text-stone-800">{qualityNote}</p>
+                    </div>
+                  ) : null}
+                  <div><h2 className="text-[15px] font-extrabold tracking-tight">Built for real benches</h2><p className="mt-1.5 text-[13px] leading-relaxed text-stone-600">Checked in small batches, photographed as-shipped, and packed to survive the courier. If it arrives dead, we replace it — no forms, no argument.</p></div>
                 </div>
-                <dl className="grid grid-cols-2 gap-x-6">
+                <dl className="grid grid-cols-2 gap-x-4">
                   {p.specs.slice(0, 4).map(([k, v]) => (
-                    <div key={k} className="border-b border-stone-200 py-2.5">
-                      <dt className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400">{k}</dt>
-                      <dd className="mt-0.5 text-[13px] font-semibold text-stone-900">{v}</dd>
+                    <div key={k} className="border-b border-stone-200 py-2">
+                      <dt className="text-[9px] font-bold uppercase tracking-[0.12em] text-stone-400">{k}</dt>
+                      <dd className="mt-0.5 text-[12px] font-semibold leading-snug text-stone-900">{v}</dd>
                     </div>
                   ))}
                 </dl>
               </div>
             )}
             {tab === "specs" && (
-              <dl className="grid max-w-3xl grid-cols-1 gap-px overflow-hidden rounded-2xl border border-stone-200 bg-stone-200 sm:grid-cols-2">
-                {p.specs.map(([k, v]) => (
-                  <div key={k} className="flex items-center gap-3 bg-white px-4 py-3.5">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-stone-100 text-stone-600"><Icon name={specIcon(k)} className="h-4 w-4" /></span>
-                    <div className="min-w-0">
-                      <dt className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400">{k}</dt>
-                      <dd className="truncate text-[13px] font-semibold text-stone-900">{v}</dd>
+              <div className="max-w-4xl space-y-3">
+                {(p.original || qualityNote) && <div className={`flex items-start gap-2.5 rounded-xl p-3 ${p.original ? "bg-[#edf4eb]" : "bg-[#faf5e9]"}`}>
+                  <Icon name={p.original ? "check-circle" : "info"} className={`mt-0.5 h-4 w-4 shrink-0 ${p.original ? "text-[#275e43]" : "text-amber-800"}`} />
+                  <div><p className="text-[9px] font-extrabold uppercase tracking-[0.13em] text-stone-500">{p.original ? "Authenticity" : "Product quality"}</p><p className="mt-0.5 text-[12px] font-semibold leading-relaxed text-stone-800">{p.original ? "Original product" : qualityNote}</p></div>
+                </div>}
+                <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {p.specs.map(([k, v]) => (
+                    <div key={k} className="min-w-0 rounded-xl bg-white px-3 py-2.5">
+                      <dt className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.1em] text-stone-500"><Icon name={specIcon(k)} className="h-3 w-3 shrink-0 text-stone-400" />{k}</dt>
+                      <dd className="mt-1 break-words text-[12px] font-semibold leading-snug text-stone-900">{v}</dd>
                     </div>
-                  </div>
-                ))}
-              </dl>
+                  ))}
+                </dl>
+              </div>
             )}
             {tab === "reviews" && (
               <div className="grid max-w-4xl gap-8 md:grid-cols-[0.55fr_1.45fr] md:gap-12">
@@ -470,15 +520,41 @@ export function ProductPage({ slug }: { slug: string }) {
         )}
       </div>
 
-      {/* mobile buy bar */}
-      <div className="fixed inset-x-0 bottom-0 z-50 border-t border-stone-200 bg-white/95 px-4 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] pt-3 backdrop-blur md:hidden">
-        <div className="flex items-center gap-3">
-          <div className="min-w-0 shrink-0">
-            <p className="text-[15px] font-extrabold leading-none tnum">{fmt(p.price * qty)}</p>
-            <p className="mt-1 text-[10px] font-semibold text-stone-500">{p.stock > 0 ? (qty > 1 ? `${qty} pcs · In stock` : "In stock") : "Out of stock"}</p>
+      {/* One purchase bar: quantity counts packs, not individual pieces. */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-stone-200 bg-white/95 shadow-[0_-10px_35px_rgba(40,35,25,0.08)] backdrop-blur-xl">
+        <div className="shell flex flex-col gap-2.5 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] pt-2.5 md:flex-row md:items-center md:gap-6 md:py-3">
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="hidden h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-stone-200 bg-sand md:block"><ResponsiveImage src={p.images[0]} alt="" sizes="48px" className="h-full w-full object-cover" /></span>
+              <div className="min-w-0" aria-live="polite">
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400">Your selection</p>
+                <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-[18px] font-extrabold leading-none tracking-tight text-stone-900 tnum">{fmt(selectedTotal)}</span>
+                  <span className="text-[11px] font-medium text-stone-500">{isPack ? `${quantity} ${quantity === 1 ? "pack" : "packs"} · ${quantity * selectedOption.units} ${p.category === "batteries" ? "cells" : "pieces"}` : `${selectedOption.label} · Qty ${quantity}`}</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-[11px] font-bold text-stone-500">Qty</span>
+              <QtyStepper qty={quantity} setQty={setQty} max={Math.max(maxQty, 1)} />
+            </div>
           </div>
-          <button disabled={!p.stock} onClick={() => { add(p.slug, qty); go("/checkout"); }} className={`${btnAccent} h-11 flex-1 justify-center px-4 text-[13px]`}>Buy now<Icon name="arrow-right" className="h-4 w-4" /></button>
-          <button disabled={!p.stock} onClick={addWithFx} aria-label="Add to cart" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-stone-100 ring-1 ring-stone-200 transition active:scale-95"><Icon name="bag" className="h-[18px] w-[18px]" /></button>
+          <div className="grid grid-cols-2 gap-2 md:w-[340px] lg:w-[380px]">
+            <button
+              type="button"
+              onClick={addWithFx}
+              disabled={!catalogReady || !canAdd}
+              aria-label={cartLine ? `${selectedOption.label} added to cart. Add more` : `Add ${selectedOption.label} to cart`}
+              title={cartLine && !canAdd ? "All available stock is already in your cart" : cartLine ? "Add more of this pack" : "Add to cart"}
+              className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl border px-2 text-[12px] font-bold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:text-[13px] ${cartLine ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" : "border-stone-300 bg-white text-stone-900 hover:border-stone-900 hover:bg-stone-50"}`}
+            >
+              <Icon name={cartLine ? "check-circle" : "bag"} className="h-4 w-4" />
+              <span>{cartLine ? "Added to cart" : "Add to cart"}</span>
+            </button>
+            <button type="button" disabled={!catalogReady || maxQty === 0} onClick={buyNow} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-amber-400 px-3 text-[13px] font-extrabold text-stone-900 shadow-sm transition hover:bg-amber-300 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-400">
+              Buy now <Icon name="arrow-right" className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

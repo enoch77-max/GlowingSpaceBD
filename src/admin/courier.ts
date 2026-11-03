@@ -33,14 +33,14 @@ export interface CourierPickupResult {
   parcels: { orderId: string; ok: boolean; consignmentId?: string; trackingCode?: string; error?: string }[];
 }
 
-const API_BASE = (import.meta.env.VITE_ADMIN_API_URL as string | undefined)?.replace(/\/$/, "");
+const API_BASE = process.env.NEXT_PUBLIC_ADMIN_API_URL?.replace(/\/$/, "");
 
 export const courierMode = (): "backend" | "demo" => (API_BASE ? "backend" : "demo");
 
 const PREFIX: Record<CourierKey, string> = { Steadfast: "SF", Pathao: "PTH", RedX: "RX" };
 
 export function toParcel(order: Order): CourierParcel {
-  const units = order.lines.reduce((sum, line) => sum + line.qty, 0);
+  const units = order.lines.reduce((sum, line) => sum + line.qty * (line.unitsPerPack ?? 1), 0);
   return {
     orderId: order.id,
     recipient: {
@@ -52,7 +52,7 @@ export function toParcel(order: Order): CourierParcel {
     codAmount: codAmount(order),
     weightKg: Math.max(0.5, Number((units * 0.25).toFixed(2))),
     // Internal staff notes are never sent to couriers.
-    itemSummary: order.lines.map((line) => `${line.name} x${line.qty}`).join(", ").slice(0, 180),
+    itemSummary: order.lines.map((line) => `${line.name}${line.variantLabel ? ` (${line.variantLabel})` : ""} x${line.qty}`).join(", ").slice(0, 180),
   };
 }
 

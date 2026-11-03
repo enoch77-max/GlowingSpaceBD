@@ -249,7 +249,7 @@ export async function commitSecretToBackendVault(params: {
   rawValue: string;
   env: VaultEnv;
 }): Promise<VaultCommitResponse> {
-  const apiBase = (import.meta.env.VITE_ADMIN_API_URL as string | undefined)?.replace(/\/$/, "");
+  const apiBase = process.env.NEXT_PUBLIC_ADMIN_API_URL?.replace(/\/$/, "");
   if (apiBase) {
     const res = await fetch(`${apiBase}/admin/secrets/${encodeURIComponent(params.key)}`, {
       method: "POST",

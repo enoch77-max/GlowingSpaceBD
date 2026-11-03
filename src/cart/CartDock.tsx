@@ -4,7 +4,7 @@ import { Link, useRouter } from "../router";
 import { useStore } from "../store";
 import { fmt } from "../data";
 import { Icon } from "../icons";
-import { QtyStepper, PayBadge } from "../components";
+import { QtyStepper } from "../components";
 import { ResponsiveImage } from "../ResponsiveImage";
 import "./cart.css";
 
@@ -18,7 +18,7 @@ import "./cart.css";
 import { useCartPanel } from "./cartPanel";
 
 function CartItems({ compact, close }: { compact: boolean; close: () => void }) {
-  const { items, setQty, remove, subtotal, discount, coupon, count, settings } = useStore();
+  const { items, setQty, remove, subtotal, discount, coupon, count, settings, cartIssue } = useStore();
   const remaining = Math.max(0, settings.freeDhakaThreshold - subtotal);
   return (
     <>
@@ -33,23 +33,23 @@ function CartItems({ compact, close }: { compact: boolean; close: () => void }) 
       {items.length ? (
         <>
           <ul className="flex-1 space-y-3 overflow-y-auto py-4">
-            {items.map(({ p, qty }) => (
-              <li key={p.slug} className="flex gap-3 rounded-2xl border border-stone-200 bg-white p-2.5">
+            {items.map(({ p, qty, unitsPerPack, variantId, variantLabel, packPrice, saleUnit, maxQty, key }) => (
+              <li key={key} className="flex gap-3 rounded-2xl border border-stone-200 bg-white p-2.5">
                 <Link to={`/product/${p.slug}`} onClick={close} className="h-[68px] w-[68px] shrink-0 overflow-hidden rounded-xl bg-stone-100">
                   <ResponsiveImage src={p.images[0]} alt={p.name} sizes="68px" className="h-full w-full object-cover" />
                 </Link>
                 <div className="flex min-w-0 flex-1 flex-col">
                   <div className="flex items-start gap-2">
                     <Link to={`/product/${p.slug}`} onClick={close} className="line-clamp-2 min-w-0 flex-1 text-[13px] font-semibold leading-snug hover:underline">{p.name}</Link>
-                    <button type="button" aria-label={`Remove ${p.name}`} onClick={() => remove(p.slug)}
+                    <button type="button" aria-label={`Remove ${p.name}, ${variantLabel}`} onClick={() => remove(p.slug, variantId)}
                       className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-stone-400 transition hover:bg-red-50 hover:text-red-600">
                       <Icon name="trash" className="h-[15px] w-[15px]" />
                     </button>
                   </div>
-                  <div className="mt-0.5 flex items-center gap-2"><PayBadge pay={p.pay} compact /><span className="font-mono text-[10px] text-stone-400">{p.sku}</span></div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-stone-600"><span>{variantLabel}</span><span aria-hidden="true">·</span><span>{fmt(packPrice)} / {saleUnit}</span></div>
                   <div className="mt-auto flex items-end justify-between gap-2 pt-2">
-                    <QtyStepper small qty={qty} setQty={(next) => setQty(p.slug, next)} max={Math.max(p.stock, 1)} />
-                    <p className="text-sm font-extrabold tnum">{fmt(p.price * qty)}</p>
+                    <QtyStepper small qty={qty} setQty={(next) => setQty(p.slug, next, variantId)} max={Math.max(maxQty, 1)} />
+                    <p className="text-sm font-extrabold tnum">{fmt(packPrice * qty)}</p>
                   </div>
                 </div>
               </li>
@@ -57,10 +57,10 @@ function CartItems({ compact, close }: { compact: boolean; close: () => void }) 
           </ul>
 
           <div className="shrink-0 space-y-3 border-t border-stone-200 pt-4">
-            {remaining > 0 && (
+            {settings.freeDhakaThreshold > 0 && (
               <div>
-                <p className="text-[11px] text-stone-500">Add <b className="tnum">{fmt(remaining)}</b> more for <b>free Dhaka delivery</b>.</p>
-                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.min(100, (subtotal / Math.max(settings.freeDhakaThreshold, 1)) * 100)}%` }} /></div>
+                <p className="text-[11px] text-stone-500">{remaining > 0 ? <>Add <b className="tnum">{fmt(remaining)}</b> more for <b>free Dhaka delivery</b>.</> : <span className="font-semibold text-emerald-700">Free Dhaka delivery unlocked.</span>}</p>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.min(100, (subtotal / settings.freeDhakaThreshold) * 100)}%` }} /></div>
               </div>
             )}
             <div className="flex items-baseline justify-between">
@@ -68,10 +68,15 @@ function CartItems({ compact, close }: { compact: boolean; close: () => void }) 
               <span className="text-lg font-extrabold tnum">{fmt(subtotal - discount)}</span>
             </div>
             <p className="text-[11px] text-stone-500">Delivery and taxes are calculated at checkout.</p>
+            {cartIssue && <p role="alert" className="rounded-xl bg-amber-50 p-2.5 text-xs font-semibold text-amber-800">{cartIssue}</p>}
             <div className={`flex gap-2 ${compact ? "" : "flex-col"}`}>
-              <Link to="/checkout" onClick={close} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-stone-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-stone-700">
-                Proceed to checkout<Icon name="arrow-right" className="h-4 w-4" />
-              </Link>
+              {cartIssue ? (
+                <button type="button" disabled className="flex flex-1 items-center justify-center rounded-full bg-stone-200 px-5 py-3 text-sm font-semibold text-stone-400">Proceed to checkout</button>
+              ) : (
+                <Link to="/checkout" onClick={close} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-stone-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-stone-700">
+                  Proceed to checkout<Icon name="arrow-right" className="h-4 w-4" />
+                </Link>
+              )}
               <Link to="/cart" onClick={close} className="flex items-center justify-center rounded-full border border-stone-300 px-5 py-3 text-sm font-semibold text-stone-800 transition hover:border-stone-900 hover:bg-stone-50">
                 View full cart
               </Link>
@@ -93,7 +98,7 @@ function CartPanel() {
   const { open, closeCart, compact, trigger } = useCartPanel();
   const panel = useRef<HTMLDivElement>(null);
   const close = useRef(closeCart);
-  close.current = closeCart;
+  useEffect(() => { close.current = closeCart; }, [closeCart]);
 
   useEffect(() => {
     if (!open) return;
@@ -162,7 +167,7 @@ function CartBubble({ raised = false }: { raised?: boolean }) {
       ref={button}
       onClick={(event) => openCart(event.currentTarget)}
       aria-label={`Open cart, ${count} item${count === 1 ? "" : "s"}`}
-      className={`cart-bubble cart-pop fixed right-4 z-50 grid h-14 w-14 place-items-center rounded-full bg-stone-900 text-white shadow-xl shadow-stone-900/25 ring-4 ring-white transition hover:scale-105 ${raised ? "bottom-[calc(env(safe-area-inset-bottom,0px)+6.25rem)]" : "bottom-[calc(env(safe-area-inset-bottom,0px)+4.25rem)]"} md:bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)]`}
+      className={`cart-bubble cart-pop fixed right-4 z-50 grid h-14 w-14 place-items-center rounded-full bg-stone-900 text-white shadow-xl shadow-stone-900/25 ring-4 ring-white transition hover:scale-105 ${raised ? "bottom-[calc(env(safe-area-inset-bottom,0px)+9rem)]" : "bottom-[calc(env(safe-area-inset-bottom,0px)+4.25rem)] md:bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)]"}`}
     >
       <Icon name="cart" className="h-[22px] w-[22px]" />
       <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-amber-400 px-1 text-[11px] font-extrabold text-stone-900 ring-2 ring-stone-900 tnum">{count}</span>

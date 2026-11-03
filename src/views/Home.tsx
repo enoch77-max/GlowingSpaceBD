@@ -107,7 +107,7 @@ export function Home() {
                 role="tab"
                 aria-selected={tab === t.key}
                 onClick={() => setTab(t.key)}
-                className={`shrink-0 rounded-full px-4 py-2 text-xs font-bold transition duration-300 ${tab === t.key ? "bg-stone-900 text-white shadow-sm" : "bg-white text-stone-600 ring-1 ring-stone-200 hover:-translate-y-0.5 hover:ring-stone-400"}`}
+                className={`shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition duration-300 ${tab === t.key ? "bg-stone-900 text-white" : "bg-[#efeee9] text-stone-600 hover:bg-[#e6e4dd] hover:text-stone-900"}`}
               >
                 {t.label}
               </button>
@@ -168,7 +168,7 @@ export function Home() {
           </Reveal>
           <Reveal stagger className="grid grid-cols-2 gap-3">
             {kits.map((p) => (
-              <Link key={p.slug} to={`/product/${p.slug}`} className="group rounded-2xl bg-paper p-2.5 ring-1 ring-stone-200/80 transition duration-300 hover:-translate-y-1 hover:ring-stone-400">
+              <Link key={p.slug} to={`/product/${p.slug}`} className="group rounded-2xl bg-[#f5f4ef] p-2.5 transition duration-300 hover:-translate-y-1 hover:bg-[#eeece5]">
                 <div className="overflow-hidden rounded-xl">
                   <ResponsiveImage src={p.images[0]} alt={p.name} loading="lazy" sizes="(max-width: 767px) 50vw, 25vw" className="aspect-[4/3] w-full object-cover transition duration-700 ease-out group-hover:scale-105" />
                 </div>

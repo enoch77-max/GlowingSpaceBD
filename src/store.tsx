@@ -1,4 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "./router";
+import { changeVariantQuantity, removeCartLines, type CartLine } from "./cart/variants";
+import { deductInventory, findVariant, inventoryMode, lineVariant, maxVariantQuantity, normalizeProduct, productInventoryIssue, type VariantChoice } from "./catalog/inventory";
 import {
   categories as seedCategories,
   defaultCouponRules,
@@ -31,7 +34,19 @@ import { batchCreateIssue, stepState, type StepKey } from "./admin/batches";
 import type { CourierPickupResult } from "./admin/courier";
 import { ToastProvider, useNotify } from "./toast";
 
-export interface Line { slug: string; qty: number }
+export type Line = CartLine;
+
+export interface CartItem {
+  p: Product;
+  qty: number;
+  unitsPerPack: number;
+  variantId: string;
+  variantLabel: string;
+  packPrice: number;
+  saleUnit: "pack" | "item";
+  maxQty: number;
+  key: string;
+}
 
 export type OrderStatus = "placed" | "confirmed" | "packed" | "shipped" | "delivered" | "cancelled";
 export type PaymentStatus = "cod_pending" | "verifying" | "paid" | "refunded";
@@ -77,7 +92,7 @@ export interface Order {
   address: string;
   city: string;
   method: string;
-  lines: { slug: string; name: string; qty: number; price: number }[];
+  lines: { slug: string; name: string; qty: number; price: number; unitsPerPack?: number; variantId?: string; variantLabel?: string; cost?: number; inventoryMode?: string }[];
   subtotal: number;
   discount: number;
   shipping: number;
@@ -200,11 +215,13 @@ export function computeCouponDiscount(subtotal: number, code: string, rules: Cou
 interface Store {
   /* Customer Cart & Auth */
   cart: Line[];
-  add: (slug: string, qty?: number) => void;
-  setQty: (slug: string, qty: number) => void;
-  remove: (slug: string) => void;
+  add: (slug: string, qty?: number, variant?: VariantChoice) => boolean;
+  selectForCheckout: (slug: string, qty: number, variant: VariantChoice) => boolean;
+  setQty: (slug: string, qty: number, variant?: VariantChoice) => boolean;
+  remove: (slug: string, variant?: VariantChoice) => void;
   clear: () => void;
-  items: { p: Product; qty: number }[];
+  items: CartItem[];
+  cartIssue: string | null;
   count: number;
   subtotal: number;
   coupon: string;
@@ -216,10 +233,12 @@ interface Store {
   logout: () => void;
   orders: Order[];
   customerOrders: Order[];
-  saveOrder: (o: Order) => void;
+  saveOrder: (o: Order, coupon?: string) => Promise<boolean>;
   notify: (m: string) => void;
 
   /* Live Storefront Catalog & Config (Admin-Controlled) */
+  catalogReady: boolean;
+  refreshCatalog: () => Promise<void>;
   catalogProducts: Product[];
   visibleProducts: Product[];
   catalogCategories: Category[];
@@ -240,10 +259,10 @@ interface Store {
   upsertStaff: (member: StaffMember) => void;
   toggleStaffActive: (id: string) => void;
 
-  upsertProduct: (product: Product, isNew?: boolean) => boolean;
-  patchProduct: (slug: string, patch: Partial<Product>, reason?: string) => boolean;
-  deleteProduct: (slug: string) => boolean;
-  bulkPatchProducts: (slugs: string[], patch: Partial<Product>, summary: string) => boolean;
+  upsertProduct: (product: Product, isNew?: boolean) => Promise<boolean>;
+  patchProduct: (slug: string, patch: Partial<Product>, reason?: string) => Promise<boolean>;
+  deleteProduct: (slug: string) => Promise<boolean>;
+  bulkPatchProducts: (slugs: string[], patch: Partial<Product>, summary: string) => Promise<boolean>;
 
   upsertCategory: (cat: Category) => boolean;
   deleteCategory: (slug: string) => boolean;
@@ -277,7 +296,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
 function StoreStateProvider({ children }: { children: ReactNode }) {
   const notify = useNotify();
+  const { path } = useRouter();
   const [catalogProducts, setCatalogProducts] = usePersist<Product[]>("gs_catalog_products_v2", seedProducts);
+  const [catalogReady, setCatalogReady] = useState(false);
+  const catalogRequest = useRef(0);
+  const refreshCatalog = useCallback(async () => {
+    const request = ++catalogRequest.current;
+    try {
+      const response = await fetch("/api/catalog", { cache: "no-store" });
+      const data = await response.json();
+      if (request !== catalogRequest.current) return;
+      if (!response.ok || !Array.isArray(data.products)) throw new Error(data.error);
+      setCatalogProducts(data.products.map(normalizeProduct));
+      if (data.config?.settings) setSettings(data.config.settings);
+      if (Array.isArray(data.config?.couponRules)) setCouponRules(data.config.couponRules);
+      setCatalogReady(true);
+    } catch { /* Retain the last catalog for browsing; checkout still revalidates on the server. */ }
+  }, [setCatalogProducts]);
+  useEffect(() => {
+    void refreshCatalog();
+    const update = () => { if (document.visibilityState === "visible") void refreshCatalog(); };
+    window.addEventListener("focus", update);
+    const timer = window.setInterval(update, 20000);
+    return () => { window.removeEventListener("focus", update); window.clearInterval(timer); };
+  }, [refreshCatalog]);
   const [catalogCategories, setCatalogCategories] = usePersist<Category[]>("gs_catalog_categories_v2", seedCategories);
   const [heroSlides, setHeroSlides] = usePersist<HeroSlideConfig[]>("gs_hero_slides_v1", defaultHeroSlides);
   const [couponRules, setCouponRules] = usePersist<CouponRule[]>("gs_coupon_rules_v1", defaultCouponRules);
@@ -286,9 +328,14 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
   const settings = useMemo(() => ({ ...defaultSettings, ...savedSettings }), [savedSettings]);
 
   const [cart, setCart] = usePersist<Line[]>("gs_cart", []);
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
+  const commitCart = (next: Line[]) => { cartRef.current = next; setCart(next); };
   const [coupon, setCoupon] = usePersist("gs_coupon", "");
   const [user, setUser] = usePersist<string | null>("gs_user", null);
   const [orders, setOrders] = usePersist<Order[]>("gs_orders", SEEDED_ORDERS);
+  const [localOrderIds, setLocalOrderIds] = usePersist<string[]>("gs_local_order_ids", []);
+  const orderSyncChains = useRef(new Map<string, Promise<void>>());
 
   const [staff, setStaff] = usePersist<StaffMember[]>("gs_admin_staff_v1", DEFAULT_STAFF);
   const [activeAdminId, setActiveAdminId] = usePersist<string | null>("gs_active_admin_v1", "stf-owner");
@@ -308,6 +355,41 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
   );
 
   const can = useCallback((perm: Permission) => hasPermission(currentAdmin?.role, perm), [currentAdmin?.role]);
+
+  const [adminSessionReadyAt, setAdminSessionReadyAt] = useState(0);
+
+  useEffect(() => {
+    if (!path.startsWith("/admin") || !currentAdmin) return;
+    let cancelled = false;
+    fetch("/api/admin/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ staffId: currentAdmin.id }),
+    })
+      .then(response => { if (response.ok && !cancelled) setAdminSessionReadyAt(Date.now()); })
+      .catch(() => { /* The next write will show a session error if still unavailable. */ });
+    return () => { cancelled = true; };
+  }, [path, currentAdmin]);
+
+  useEffect(() => {
+    if (!path.startsWith("/admin") || !currentAdmin || !adminSessionReadyAt) return;
+    let active = true;
+    fetch("/api/orders?admin=1", { cache: "no-store" })
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (!active || !data?.ok || !Array.isArray(data.orders)) return;
+        setOrders(previous => {
+          const merged = new Map(previous.map(order => [order.id, order]));
+          for (const order of data.orders as Order[]) {
+            const local = merged.get(order.id);
+            if (!local || (order.updatedAt ?? order.created) >= (local.updatedAt ?? local.created)) merged.set(order.id, order);
+          }
+          return [...merged.values()].sort((a, b) => b.created - a.created);
+        });
+      })
+      .catch(() => { /* Keep the offline order queue available. */ });
+    return () => { active = false; };
+  }, [path, currentAdmin, setOrders, adminSessionReadyAt]);
 
   const recordAudit = (action: string, target: string, category: AuditEntry["category"]) => {
     const actorName = currentAdmin?.name ?? "Admin";
@@ -346,29 +428,56 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     (includeHidden ? allProductsBySlug : visibleProductsBySlug).get(slug), [allProductsBySlug, visibleProductsBySlug]);
   const categoryLabel = useCallback((slug: string) => categoryNames.get(slug) ?? slug, [categoryNames]);
 
-  const add = (slug: string, qty = 1) => {
+  const updatePack = (slug: string, qty: number, choice: VariantChoice | undefined, mode: "add" | "replace", announce = false) => {
+    if (!catalogReady) { notify("Connecting to inventory. Please retry in a moment."); return false; }
     const product = findProduct(slug, false);
-    if (!product?.stock) { notify("Currently out of stock"); return; }
-    const existing = cart.find((line) => line.slug === slug);
-    if (existing && existing.qty >= product.stock) { notify(`Only ${product.stock} available`); return; }
-    setCart((current) => current.some((line) => line.slug === slug)
-      ? current.map((line) => line.slug === slug ? { ...line, qty: Math.min(product.stock, line.qty + qty) } : line)
-      : [...current, { slug, qty: Math.min(qty, product.stock) }]);
-    notify("Added to cart");
+    if (!product) { notify("Product no longer available"); return false; }
+    const variant = findVariant(product, choice);
+    const result = changeVariantQuantity(cartRef.current, product, choice, qty, mode);
+    if (!result.ok) {
+      notify(result.max > 0 ? `Only ${result.max} more available for this variant` : "No more stock available for this variant");
+      return false;
+    }
+    commitCart(result.lines);
+    if (announce) notify(`${variant?.label ?? "Item"} added to cart`);
+    return true;
+  };
+  const add = (slug: string, qty = 1, variant?: VariantChoice) => updatePack(slug, qty, variant, "add", true);
+  const selectForCheckout = (slug: string, qty: number, variant: VariantChoice) => updatePack(slug, qty, variant, "replace");
+  const setQty = (slug: string, qty: number, variant?: VariantChoice) => updatePack(slug, qty, variant, "replace");
+  const remove = (slug: string, choice?: VariantChoice) => {
+    const p = findProduct(slug, true);
+    // When the product is gone its variants cannot be resolved, so every line of it
+    // is purged. Otherwise one specific variant is targeted.
+    const variantId = !p
+      ? undefined
+      : choice === undefined
+        ? undefined
+        : typeof choice === "string" ? choice : findVariant(p, choice)?.id;
+    commitCart(removeCartLines(cartRef.current, slug, variantId, (line) => (p ? lineVariant(p, line)?.id : undefined)));
   };
 
-  const setQty = (slug: string, qty: number) => setCart((current) => current.map((line) => line.slug === slug
-    ? { ...line, qty: Math.max(1, Math.min(qty, findProduct(slug, true)?.stock ?? 1)) }
-    : line));
-
-  const remove = (slug: string) => setCart((c) => c.filter((l) => l.slug !== slug));
-
-  const items = useMemo(
-    () => cart.map((l) => ({ p: findProduct(l.slug, false)!, qty: l.qty })).filter((i) => Boolean(i.p)),
-    [cart, findProduct],
-  );
-
-  const subtotal = items.reduce((s, i) => s + i.p.price * i.qty, 0);
+  const items = useMemo<CartItem[]>(() => cart.map(line => {
+    // A cart line whose product was deleted still renders, but never with a partial object.
+    const p = findProduct(line.slug, true) ?? {
+      slug: line.slug, sku: line.slug, name: "Unavailable product", category: "modules",
+      price: 0, stock: 0, pay: "cod", images: ["/img/kit.jpg"],
+      short: "This product is no longer available.", specs: [], rating: 0, reviews: 0,
+    } satisfies Product;
+    const v = lineVariant(p, line);
+    return { p, qty: line.qty, unitsPerPack: v?.unitsPerPack ?? line.unitsPerPack ?? 1, variantId: v?.id ?? line.variantId ?? "unavailable", variantLabel: v?.label ?? "Unavailable variant · remove from cart", packPrice: v?.price ?? 0, saleUnit: inventoryMode(p) === "shared_units" ? "pack" : "item", maxQty: v ? maxVariantQuantity(cart, p, v) : 0, key: `${line.slug}::${v?.id ?? line.variantId ?? line.unitsPerPack ?? 1}` };
+  }), [cart, findProduct]);
+  const cartIssue = useMemo(() => {
+    try {
+      for (const slug of new Set(cart.map(line => line.slug))) {
+        const p = findProduct(slug, false);
+        if (!p) return "A product is no longer available. Remove it from your cart.";
+        deductInventory(p, cart);
+      }
+      return null;
+    } catch (error) { return error instanceof Error ? error.message : "Stock changed. Update your cart."; }
+  }, [cart, findProduct]);
+  const subtotal = items.reduce((sum, item) => sum + item.packPrice * item.qty, 0);
   const discount = computeCouponDiscount(subtotal, coupon, couponRules);
 
   const applyCoupon = (c: string) => {
@@ -383,24 +492,23 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     return true;
   };
 
-  const saveOrder = (o: Order) => {
-    const enriched: Order = {
-      ...o,
-      status: o.status ?? "placed",
-      paymentStatus: o.paymentStatus ?? (o.method === "cod" ? "cod_pending" : "verifying"),
-      courier: o.courier ?? "Unassigned",
-      customerPlaced: true,
-      updatedAt: Date.now(),
-    };
-    setOrders((prev) => [enriched, ...prev]);
-    // Deduct stock on ordered lines so inventory stays accurate
-    setCatalogProducts((prev) => prev.map((prod) => {
-      const line = o.lines.find((l) => l.slug === prod.slug);
-      return line ? { ...prod, stock: Math.max(0, prod.stock - line.qty) } : prod;
-    }));
-    if (coupon) {
-      setCouponRules((prev) => prev.map((r) => r.code === coupon ? { ...r, used: r.used + 1 } : r));
-    }
+  const saveOrder = async (o: Order, appliedCoupon = "") => {
+    try {
+      const response = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...o, coupon: appliedCoupon }) });
+      const data = await response.json();
+      if (!response.ok) {
+        notify(data.error ?? "Order could not be placed. Please retry.");
+        await refreshCatalog();
+        return false;
+      }
+      const order = { ...data.order, updatedAt: data.order.updatedAt ?? Date.now() } as Order;
+      setOrders(prev => [order, ...prev.filter(item => item.id !== order.id)]);
+      setLocalOrderIds(prev => prev.includes(order.id) ? prev : [order.id, ...prev].slice(0, 200));
+      setCatalogProducts(prev => prev.map(p => (data.products as Product[]).find(next => next.slug === p.slug) ?? p));
+      if (Array.isArray(data.couponRules)) setCouponRules(data.couponRules);
+      if (data.settings) setSettings(data.settings);
+      return true;
+    } catch { notify("Connection failed. Your cart has been kept; please retry."); return false; }
   };
 
   /* ---------- Admin RBAC & Mutations ---------- */
@@ -409,17 +517,24 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     const member = staff.find((m) => m.id === staffId && m.active);
     if (!member) return;
     setActiveAdminId(member.id);
+    void fetch("/api/admin/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ staffId }) })
+      .then(async response => { if (!response.ok) notify((await response.json()).error ?? "Could not start admin session"); })
+      .catch(() => notify("Could not start admin session. Check your connection."));
   };
 
   const switchAdminRole = (role: AdminRole) => {
     const target = staff.find((m) => m.role === role && m.active);
     if (target) {
       setActiveAdminId(target.id);
+      void fetch("/api/admin/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ staffId: target.id }) });
       notify(`Switched role to ${target.name} (${role})`);
     }
   };
 
-  const signOutAdmin = () => setActiveAdminId(null);
+  const signOutAdmin = () => {
+    setActiveAdminId(null);
+    void fetch("/api/admin/session", { method: "DELETE" });
+  };
 
   const upsertStaff = (member: StaffMember) => {
     if (!can("team.manage")) { notify("Permission denied: Owner role required"); return; }
@@ -441,54 +556,51 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     recordAudit(target.active ? "Suspended staff access" : "Restored staff access", target.name, "team");
   };
 
-  const upsertProduct = (product: Product, isNew = false) => {
+  const persistProduct = async (product: Product, isNew = false, reason = "Product updated") => {
+    const issue = productInventoryIssue(product);
+    if (issue) { notify(issue); return false; }
+    try {
+      const response = await fetch("/api/catalog", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product, isNew, reason }) });
+      const data = await response.json();
+      if (!response.ok) { notify(data.error ?? "Could not save product"); if (response.status === 409) await refreshCatalog(); return false; }
+      setCatalogProducts(prev => prev.some(p => p.slug === data.product.slug) ? prev.map(p => p.slug === data.product.slug ? data.product : p) : [data.product, ...prev]);
+      return true;
+    } catch { notify("Product was not saved. Check your connection and retry."); return false; }
+  };
+  const upsertProduct = async (product: Product, isNew = false) => {
     if (!can("catalog.write")) { notify("Permission denied: Catalog write required"); return false; }
-    setCatalogProducts((prev) => {
-      const exists = prev.some((p) => p.slug === product.slug);
-      return exists ? prev.map((p) => p.slug === product.slug ? product : p) : [product, ...prev];
-    });
-    recordAudit(isNew ? "Created product SKU" : "Updated product details", `${product.name} (${product.sku})`, "catalog");
-    notify(isNew ? `Created ${product.sku}` : `Saved ${product.sku}`);
-    return true;
+    const saved = await persistProduct(product, isNew, isNew ? "Created product" : "Edited variants, pricing and inventory");
+    if (saved) { recordAudit(isNew ? "Created product" : "Updated product", product.sku, "catalog"); notify(`Saved ${product.sku}`); }
+    return saved;
   };
-
-  const patchProduct = (slug: string, patch: Partial<Product>, reason?: string) => {
-    const keys = Object.keys(patch);
-    const stockOnly = keys.every((k) => k === "stock" || k === "lowStockAt");
-    if (stockOnly ? !can("inventory.write") : !can("catalog.write")) {
-      notify("Permission denied for your current role");
-      return false;
-    }
-    const target = catalogProducts.find((p) => p.slug === slug);
-    if (!target) return false;
-    setCatalogProducts((prev) => prev.map((p) => p.slug === slug ? { ...p, ...patch } : p));
-    recordAudit(reason ?? `Updated ${keys.join(", ")}`, `${target.sku} · ${target.name}`, "catalog");
-    return true;
+  const patchProduct = async (slug: string, patch: Partial<Product>, reason?: string) => {
+    const stockOnly = Object.keys(patch).every(k => k === "stock" || k === "lowStockAt");
+    if (stockOnly ? !can("inventory.write") : !can("catalog.write")) { notify("Permission denied"); return false; }
+    const p = findProduct(slug, true);
+    if (!p) return false;
+    if (inventoryMode(p) === "independent" && patch.stock !== undefined) { notify("Edit stock on the individual variants instead."); return false; }
+    const saved = await persistProduct({ ...p, ...patch }, false, reason);
+    if (saved) recordAudit(reason ?? "Product updated", p.sku, "catalog");
+    return saved;
   };
-
-  const deleteProduct = (slug: string) => {
+  const deleteProduct = async (slug: string) => {
     if (!can("catalog.write")) { notify("Permission denied"); return false; }
-    const target = catalogProducts.find((p) => p.slug === slug);
-    if (!target) return false;
-    setCatalogProducts((prev) => prev.filter((p) => p.slug !== slug));
-    setCart((prev) => prev.filter((l) => l.slug !== slug));
-    recordAudit("Deleted product SKU", `${target.sku} · ${target.name}`, "catalog");
-    notify(`Deleted ${target.sku}`);
-    return true;
+    const p = findProduct(slug, true);
+    if (!p) return false;
+    try {
+      const response = await fetch("/api/catalog", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug, version: p.inventoryVersion }) });
+      const data = await response.json();
+      if (!response.ok) { notify(data.error); await refreshCatalog(); return false; }
+      setCatalogProducts(prev => prev.filter(item => item.slug !== slug));
+      commitCart(cartRef.current.filter(line => line.slug !== slug));
+      recordAudit("Archived product", p.sku, "catalog"); notify("Product archived"); return true;
+    } catch { notify("Could not archive product"); return false; }
   };
-
-  const bulkPatchProducts = (slugs: string[], patch: Partial<Product>, summary: string) => {
-    const keys = Object.keys(patch);
-    const stockOnly = keys.every((k) => k === "stock");
-    if (stockOnly ? !can("inventory.write") : !can("catalog.write")) {
-      notify("Permission denied");
-      return false;
-    }
-    const set = new Set(slugs);
-    setCatalogProducts((prev) => prev.map((p) => set.has(p.slug) ? { ...p, ...patch } : p));
-    recordAudit(summary, `${slugs.length} SKUs`, "catalog");
-    notify(`${summary} (${slugs.length} items)`);
-    return true;
+  const bulkPatchProducts = async (slugs: string[], patch: Partial<Product>, summary: string) => {
+    let saved = 0;
+    for (const slug of slugs) if (await patchProduct(slug, patch, summary)) saved++;
+    notify(`${summary}: ${saved} of ${slugs.length} saved`);
+    return saved === slugs.length;
   };
 
   const upsertCategory = (cat: Category) => {
@@ -521,6 +633,12 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     return true;
   };
 
+  const syncCatalogConfig = (nextSettings: StoreSettings, nextRules: CouponRule[]) => {
+    fetch("/api/catalog", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: { settings: nextSettings, couponRules: nextRules } }) })
+      .then(async response => { if (!response.ok) notify((await response.json()).error ?? "Configuration could not be synced"); })
+      .catch(() => notify("Configuration could not be synced. Retry when connected."));
+  };
+
   const upsertCouponRule = (rule: CouponRule) => {
     if (!can("marketing.write")) { notify("Permission denied"); return false; }
     if (!/^[A-Z0-9_-]{3,32}$/i.test(rule.code) || rule.value <= 0 || (rule.type === "percent" && rule.value > 100) || rule.minSubtotal < 0) {
@@ -532,6 +650,7 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
       ? prev.map((r) => r.code === normalized.code ? normalized : r)
       : [normalized, ...prev]);
     recordAudit("Saved coupon rule", normalized.code, "settings");
+    syncCatalogConfig(settings, couponRules.some(rule => rule.code === normalized.code) ? couponRules.map(rule => rule.code === normalized.code ? normalized : rule) : [normalized, ...couponRules]);
     notify(`Saved coupon ${normalized.code}`);
     return true;
   };
@@ -541,6 +660,7 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     setCouponRules((prev) => prev.filter((r) => r.code !== code));
     if (coupon === code) setCoupon("");
     recordAudit("Deleted coupon code", code, "settings");
+    syncCatalogConfig(settings, couponRules.filter(r => r.code !== code));
     notify(`Removed ${code}`);
     return true;
   };
@@ -554,6 +674,7 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
       return false;
     }
     setSettings((prev) => ({ ...prev, ...patch }));
+    syncCatalogConfig({ ...settings, ...patch }, couponRules);
     recordAudit(summary, Object.keys(patch).join(", "), storefrontOnly ? "storefront" : "settings");
     notify("Store settings saved");
     return true;
@@ -571,6 +692,35 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     updatedAt: at,
     events: [...(o.events ?? []), { id: `evt-${at}-${Math.random().toString(36).slice(2, 7)}`, at, actor: currentAdmin?.name ?? "Staff", label }].slice(-100),
   });
+  const syncOrderPatch = (id: string, patch: Partial<Order>, summary?: string, expectedVersion?: number) => {
+    const previous = orderSyncChains.current.get(id) ?? Promise.resolve();
+    const serverPatch = Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, value === undefined ? null : value]));
+    const task = previous.catch(() => undefined).then(async () => {
+      try {
+        const response = await fetch(`/api/orders/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ patch: serverPatch, summary, expectedVersion }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          notify(data.error ?? `${id} could not be synced to the database`);
+          return;
+        }
+        setOrders(prev => prev.map(order => order.id === id && (data.order.updatedAt ?? 0) > (order.updatedAt ?? order.created) ? data.order : order));
+        if (Array.isArray(data.products)) {
+          setCatalogProducts(prev => prev.map(product => (data.products as Product[]).find(next => next.slug === product.slug) ?? product));
+        }
+      } catch {
+        notify(`${id} is saved on this device, but the database update failed. Retry when connected.`);
+      }
+    });
+    orderSyncChains.current.set(id, task);
+    void task.finally(() => {
+      if (orderSyncChains.current.get(id) === task) orderSyncChains.current.delete(id);
+    });
+  };
+
   const updateOrder = (id: string, patch: Partial<Order>, summary?: string, expectedVersion?: number) => {
     if (!orderPermission(patch)) { notify("You do not have permission for this update."); return false; }
     const current = ordersById.get(id);
@@ -583,6 +733,7 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     if (Object.entries(patch).every(([key, value]) => (current as unknown as Record<string, unknown>)[key] === value)) return true;
     const action = summary ?? (patch.status ? `Fulfillment changed to ${patch.status}` : patch.paymentStatus ? `Payment changed to ${patch.paymentStatus}` : "Order details updated");
     setOrders(prev => prev.map(o => o.id === id ? applyOrderPatch(o, patch, action, Date.now()) : o));
+    syncOrderPatch(id, patch, action, expectedVersion);
     recordAudit(action, id, "orders");
     notify(`${id} updated`);
     return true;
@@ -604,6 +755,7 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     const action = patch.status ? `Fulfillment changed to ${patch.status}` : patch.courier ? `Courier assigned: ${patch.courier}` : "Order updated";
     const at = Date.now();
     setOrders(prev => prev.map(o => eligible.has(o.id) ? applyOrderPatch(o, patch, action, at) : o));
+    eligible.forEach(id => syncOrderPatch(id, patch, action));
     recordAudit(`Bulk: ${action}`, `${eligible.size} orders`, "orders");
     notify(`${eligible.size} orders updated${skipped.length ? `, ${skipped.length} skipped` : ""}`);
     return { updated: eligible.size, skipped };
@@ -647,6 +799,7 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     setOrders((prev) => prev.map((o): Order => (eligibleIds.has(o.id)
       ? { ...o, batchId: id, courier: input.courier, updatedAt: at, events: [...(o.events ?? []), activity(`Added to batch ${id}`, at)].slice(-100) }
       : o)));
+    eligible.forEach(orderId => syncOrderPatch(orderId, { batchId: id, courier: input.courier }, `Added to batch ${id}`));
     recordAudit(`Created batch ${id}`, `${eligible.length} orders · ${input.courier}`, "orders");
     notify(`Batch ${id} created`);
     return { id, skipped };
@@ -672,6 +825,7 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
       setOrders((prev) => prev.map((o): Order => (eligibleIds.has(o.id)
         ? { ...o, status: to, updatedAt: at, events: [...(o.events ?? []), activity(`Batch ${batchId}: ${to}`, at)].slice(-100) }
         : o)));
+      eligible.forEach(orderId => syncOrderPatch(orderId, { status: to }, `Batch ${batchId}: ${to}`));
     }
     setBatches((prev) => prev.map((b) => (b.id === batchId ? { ...b, events: [...b.events, activity(label, at)].slice(-200) } : b)));
     recordAudit(label, batchId, "orders");
@@ -691,6 +845,7 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
     setOrders((prev) => prev.map((o): Order => (o.id === orderId
       ? { ...o, batchId: undefined, courier: "Unassigned", updatedAt: at, events: [...(o.events ?? []), activity(`Removed from batch ${batchId}`, at)].slice(-100) }
       : o)));
+    syncOrderPatch(orderId, { batchId: undefined, courier: "Unassigned" }, `Removed from batch ${batchId}`);
     setBatches((prev) => prev.map((b) => (b.id === batchId ? { ...b, events: [...b.events, activity(`Removed ${orderId}`, at)].slice(-200) } : b)));
     recordAudit(`Removed ${orderId} from batch`, batchId, "orders");
     notify(`${orderId} removed from ${batchId}`);
@@ -729,6 +884,15 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
         events: [...(o.events ?? []), activity(`Courier rejected parcel: ${reason}`, at)].slice(-100),
       };
     }));
+    attemptedIds.forEach(orderId => {
+      const result = byOrder.get(orderId);
+      if (result?.ok) {
+        const code = result.trackingCode ?? result.consignmentId ?? "";
+        syncOrderPatch(orderId, { status: "shipped", trackingCode: code, courier: batch.courier, parcelError: undefined }, `Dispatched with ${batch.courier} · ${code}`);
+      } else {
+        syncOrderPatch(orderId, { parcelError: result?.error ?? "No response from courier" }, "Courier rejected parcel");
+      }
+    });
     const request: BatchPickupRequest = {
       id: `PU-${at}`,
       attempt: batch.pickupRequests.length + 1,
@@ -819,19 +983,19 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
   };
 
   const customerOrders = useMemo(
-    () => normalizedOrders.filter((o) => o.customerPlaced || (user && o.phone === user)),
-    [normalizedOrders, user],
+    () => normalizedOrders.filter((order) => localOrderIds.includes(order.id) || (user && order.phone === user)),
+    [normalizedOrders, user, localOrderIds],
   );
 
   return (
     <Ctx.Provider value={{
-      cart, add, setQty, remove, clear: () => { setCart([]); setCoupon(""); },
-      items, count: items.reduce((s, i) => s + i.qty, 0), subtotal,
+      cart, add, selectForCheckout, setQty, remove, clear: () => { commitCart([]); setCoupon(""); },
+      items, cartIssue, count: items.reduce((s, i) => s + i.qty, 0), subtotal,
       coupon, applyCoupon, removeCoupon: () => setCoupon(""), discount,
       user, login: setUser, logout: () => setUser(null),
       orders: normalizedOrders, customerOrders, saveOrder, notify,
 
-      catalogProducts, visibleProducts, catalogCategories, visibleCategories,
+      catalogReady, refreshCatalog, catalogProducts, visibleProducts, catalogCategories, visibleCategories,
       findProduct, categoryLabel, heroSlides, couponRules, settings,
 
       staff, currentAdmin, can, signInAdmin, switchAdminRole, signOutAdmin,

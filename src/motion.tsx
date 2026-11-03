@@ -3,6 +3,9 @@ import { Icon } from "./icons";
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
 
+/** Escape a URL for safe use inside CSS url("…"). */
+export const escapeCssUrl = (url: string) => url.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
 /** True when the visitor has asked their device for less motion. */
 export function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(() => typeof window !== "undefined" && window.matchMedia(REDUCED).matches);
@@ -32,14 +35,10 @@ export function useIsVisible<T extends Element>(): [RefObject<T | null>, boolean
 /** Becomes true the first time an element scrolls into view, then stops observing. */
 function useSeenOnce<T extends Element>(): [RefObject<T | null>, boolean] {
   const ref = useRef<T | null>(null);
-  const [seen, setSeen] = useState(false);
+  const [seen, setSeen] = useState(() => typeof IntersectionObserver === "undefined");
   useEffect(() => {
     const el = ref.current;
-    if (seen || !el) return;
-    if (typeof IntersectionObserver === "undefined") {
-      setSeen(true);
-      return;
-    }
+    if (seen || !el || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
@@ -139,7 +138,7 @@ export function flyToCart(source: Element | null, image?: string) {
   dot.className = "fly-dot";
   dot.setAttribute("aria-hidden", "true");
   const imageUrl = source instanceof HTMLImageElement ? source.currentSrc || image : image;
-  if (imageUrl) dot.style.backgroundImage = `url("${imageUrl}")`;
+  if (imageUrl) dot.style.backgroundImage = `url("${escapeCssUrl(imageUrl)}")`;
   dot.style.left = `${sx - size / 2}px`;
   dot.style.top = `${sy - size / 2}px`;
   document.body.appendChild(dot);

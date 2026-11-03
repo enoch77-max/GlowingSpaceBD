@@ -1,3 +1,5 @@
+"use client";
+
 import {
   createContext,
   useContext,
@@ -34,29 +36,37 @@ type RouterValue = {
 
 const Ctx = createContext<RouterValue>(null!);
 const STATE_KEY = "__glowingNavigation";
-const currentUrl = () => window.location.pathname + window.location.search + window.location.hash;
+const FALLBACK_ORIGIN = "https://glowingspace.com.bd";
+const isBrowser = () => typeof window !== "undefined";
+const currentUrl = (fallback = "/") =>
+  isBrowser() ? window.location.pathname + window.location.search + window.location.hash : fallback;
+const currentOrigin = () => (isBrowser() ? window.location.origin : FALLBACK_ORIGIN);
 const isBrowsePage = (path: string) => path === "/" || /^\/(shop|product)(\/|$)/.test(path);
 const newEntryId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 function stateObject(): Record<string, unknown> {
+  if (!isBrowser()) return {};
   const state: unknown = window.history.state;
   return state && typeof state === "object" && !Array.isArray(state)
-    ? state as Record<string, unknown>
+    ? (state as Record<string, unknown>)
     : {};
 }
 
 function getEntry(): Entry | undefined {
+  if (!isBrowser()) return undefined;
   const value = stateObject()[STATE_KEY];
   return value && typeof value === "object" && "id" in value
-    ? value as Entry
+    ? (value as Entry)
     : undefined;
 }
 
 function writeEntry(entry: Entry) {
+  if (!isBrowser()) return;
   window.history.replaceState({ ...stateObject(), [STATE_KEY]: entry }, "", currentUrl());
 }
 
 function ensureEntry(): Entry {
+  if (!isBrowser()) return { id: "ssr-entry", y: 0 };
   const existing = getEntry();
   if (existing) return existing;
   const entry = { id: newEntryId(), y: window.scrollY };
@@ -65,22 +75,28 @@ function ensureEntry(): Entry {
 }
 
 function savePosition() {
+  if (!isBrowser()) return;
   const entry = ensureEntry();
   const active = document.activeElement;
   const main = document.getElementById("main");
   writeEntry({
     ...entry,
     y: window.scrollY,
-    focusHref: active instanceof HTMLAnchorElement && main?.contains(active)
-      ? active.getAttribute("href") ?? undefined
-      : entry.focusHref,
+    focusHref:
+      active instanceof HTMLAnchorElement && main?.contains(active)
+        ? active.getAttribute("href") ?? undefined
+        : entry.focusHref,
   });
 }
 
 function scrollToHash(hash: string) {
+  if (!isBrowser()) return false;
   let id: string;
-  try { id = decodeURIComponent(hash.slice(1)); }
-  catch { return false; }
+  try {
+    id = decodeURIComponent(hash.slice(1));
+  } catch {
+    return false;
+  }
   const target = document.getElementById(id);
   if (!target) return false;
   const header = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
@@ -88,24 +104,29 @@ function scrollToHash(hash: string) {
   return true;
 }
 
-export function Router({ children }: { children: ReactNode }) {
-  const [loc, setLoc] = useState(currentUrl);
-  const entryRef = useRef<Entry | null>(null);
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+export function Router({ children, initialUrl = "/" }: { children: ReactNode; initialUrl?: string }) {
+  const [loc, setLoc] = useState(() => currentUrl(initialUrl));
+  const [entry, setEntry] = useState<Entry>(() => ensureEntry());
   const initialized = useRef(false);
   const pending = useRef<{ kind: "top" | "preserve" | "restore"; y: number } | null>(null);
-  if (!entryRef.current) entryRef.current = ensureEntry();
 
   useEffect(() => {
+    setLoc(currentUrl(initialUrl));
     const previousSetting = window.history.scrollRestoration;
     window.history.scrollRestoration = "manual";
     let frame = 0;
     const onScroll = () => {
       if (frame) return;
-      frame = requestAnimationFrame(() => { frame = 0; savePosition(); });
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        savePosition();
+      });
     };
     const onPop = () => {
       const entry = ensureEntry();
-      entryRef.current = entry;
+      setEntry(entry);
       pending.current = { kind: "restore", y: entry.y };
       setLoc(currentUrl());
     };
@@ -117,10 +138,11 @@ export function Router({ children }: { children: ReactNode }) {
       if (frame) cancelAnimationFrame(frame);
       window.history.scrollRestoration = previousSetting;
     };
-  }, []);
+  }, [initialUrl]);
 
   // Run after React has mounted the destination, but before it is painted.
-  useLayoutEffect(() => {
+  useIsoLayoutEffect(() => {
+    if (!isBrowser()) return;
     const task = pending.current;
     if (!task) {
       if (!initialized.current) {
@@ -137,7 +159,9 @@ export function Router({ children }: { children: ReactNode }) {
     if (!hash || !scrollToHash(hash)) window.scrollTo(0, task.y);
 
     if (task.kind === "top") {
-      const heading = document.querySelector<HTMLElement>("#main .hero-slide[data-active='true'] h1, #main .hero-slide[data-active='true'] h2, #main h1");
+      const heading = document.querySelector<HTMLElement>(
+        "#main .hero-slide[data-active='true'] h1, #main .hero-slide[data-active='true'] h2, #main h1",
+      );
       if (heading) {
         heading.tabIndex = -1;
         heading.focus({ preventScroll: true });
@@ -145,14 +169,16 @@ export function Router({ children }: { children: ReactNode }) {
     } else if (task.kind === "restore") {
       const focusHref = getEntry()?.focusHref;
       if (focusHref) {
-        const anchor = Array.from(document.querySelectorAll<HTMLAnchorElement>("#main a[href]"))
-          .find((link) => link.getAttribute("href") === focusHref);
+        const anchor = Array.from(document.querySelectorAll<HTMLAnchorElement>("#main a[href]")).find(
+          (link) => link.getAttribute("href") === focusHref,
+        );
         anchor?.focus({ preventScroll: true });
       }
     }
   }, [loc]);
 
   const go = (to: string, options: NavigationOptions = {}) => {
+    if (!isBrowser()) return;
     const target = new URL(to, window.location.href);
     if (target.origin !== window.location.origin) {
       window.location.assign(target.href);
@@ -167,9 +193,7 @@ export function Router({ children }: { children: ReactNode }) {
 
     savePosition();
     const previous = ensureEntry();
-    const browse = isBrowsePage(window.location.pathname)
-      ? currentUrl()
-      : previous.browse ?? "/shop";
+    const browse = isBrowsePage(window.location.pathname) ? currentUrl() : previous.browse ?? "/shop";
     const mode = options.scroll ?? "top";
     const y = mode === "preserve" ? window.scrollY : 0;
     const entry: Entry = options.replace
@@ -178,29 +202,30 @@ export function Router({ children }: { children: ReactNode }) {
     const state = { ...stateObject(), [STATE_KEY]: entry };
     if (options.replace) window.history.replaceState(state, "", next);
     else window.history.pushState(state, "", next);
-    entryRef.current = entry;
+    setEntry(entry);
     pending.current = { kind: mode, y };
     setLoc(next);
   };
 
   const back = (fallback = "/shop") => {
-    if (getEntry()?.from && window.history.length > 1) window.history.back();
+    if (isBrowser() && getEntry()?.from && window.history.length > 1) window.history.back();
     else go(fallback);
   };
 
-  const url = new URL(loc, window.location.origin);
-  const entry = entryRef.current;
+  const url = new URL(loc, currentOrigin());
   return (
-    <Ctx.Provider value={{
-      path: url.pathname.replace(/\/$/, "") || "/",
-      search: url.searchParams,
-      hash: url.hash,
-      entryId: entry?.id ?? "",
-      previous: entry?.from,
-      shoppingReturn: isBrowsePage(url.pathname) ? currentUrl() : entry?.browse ?? "/shop",
-      go,
-      back,
-    }}>
+    <Ctx.Provider
+      value={{
+        path: url.pathname.replace(/\/$/, "") || "/",
+        search: url.searchParams,
+        hash: url.hash,
+        entryId: entry?.id ?? "",
+        previous: entry?.from,
+        shoppingReturn: isBrowsePage(url.pathname) ? currentUrl(initialUrl) : entry?.browse ?? "/shop",
+        go,
+        back,
+      }}
+    >
       {children}
     </Ctx.Provider>
   );
@@ -229,17 +254,32 @@ export function Link({ to, replace, scroll, onClick, target, download, children,
   const { go } = useRouter();
   const click = (event: MouseEvent<HTMLAnchorElement>) => {
     onClick?.(event);
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (target && target !== "_self") || download !== undefined) return;
-    if (new URL(to, window.location.href).origin !== window.location.origin) return;
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      (target && target !== "_self") ||
+      download !== undefined
+    )
+      return;
+    if (isBrowser() && new URL(to, window.location.href).origin !== window.location.origin) return;
     event.preventDefault();
     go(to, { replace, scroll });
   };
-  return <a href={to} target={target} download={download} onClick={click} {...rest}>{children}</a>;
+  return (
+    <a href={to} target={target} download={download} onClick={click} {...rest}>
+      {children}
+    </a>
+  );
 }
 
 /** Match "/product/:slug" against a pathname. */
 export function match(pattern: string, path: string): Record<string, string> | null {
-  const a = pattern.split("/"), b = path.split("/");
+  const a = pattern.split("/"),
+    b = path.split("/");
   if (a.length !== b.length) return null;
   const params: Record<string, string> = {};
   for (let i = 0; i < a.length; i++) {

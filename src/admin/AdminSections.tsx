@@ -1,5 +1,7 @@
 import { Select } from "../ui/Select";
-import { useMemo, useState } from "react";
+import { ProductInventoryEditor } from "./ProductInventoryEditor";
+import { getVariants, inventoryMode, normalizeProduct, productInventoryIssue, variantIsLow } from "../catalog/inventory";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "../router";
 import { STUDIO_GALLERY, fmt, type Category, type HeroSlideConfig, type HeroTheme, type Pay, type Product } from "../data";
 import { useStore } from "../store";
@@ -15,6 +17,7 @@ export { IconBtn, SwitchToggle, adminInput, adminBtnPrimary, adminBtnAccent, adm
 export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }) {
   const {
     catalogProducts,
+    catalogReady,
     catalogCategories,
     categoryLabel,
     patchProduct,
@@ -40,7 +43,7 @@ export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }
     return catalogProducts.filter((p) => {
       if (catFilter !== "all" && p.category !== catFilter) return false;
       if (payFilter !== "all" && p.pay !== payFilter) return false;
-      if (stockFilter === "low" && !(p.stock > 0 && p.stock <= (p.lowStockAt ?? 10))) return false;
+      if (stockFilter === "low" && !getVariants(p).some(v => v.enabled !== false && variantIsLow(p, v))) return false;
       if (stockFilter === "out" && p.stock !== 0) return false;
       if (stockFilter === "hidden" && p.published !== false) return false;
       if (!term) return true;
@@ -70,7 +73,8 @@ export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }
         mrp: undefined,
         cost: 220,
         stock: 25,
-        lowStockAt: 10,
+        lowStockAt: 5,
+        inventoryMode: "single",
         pay: "cod",
         images: [STUDIO_GALLERY[3].url],
         short: "",
@@ -152,13 +156,14 @@ export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }
             <option value="prepay">Advance only</option>
           </Select>
 
-          {canWriteCatalog && <button type="button" onClick={openNewProduct} className={adminBtnAccent}>
+          {canWriteCatalog && <button type="button" disabled={!catalogReady} onClick={openNewProduct} className={adminBtnAccent}>
             <Icon name="plus" className="h-4 w-4" />
             <span>Add product</span>
           </button>}
         </div>
       </div>
 
+      {!catalogReady && <p role="status" className="text-xs text-stone-500">Connecting to live inventory… Product edits become available once connected.</p>}
       {/* Bulk Action Bar */}
       {canWriteCatalog && selectedSlugs.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-stone-900 px-4 py-3 text-xs text-white">
@@ -234,7 +239,7 @@ export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }
               {filtered.map((p) => {
                 const cost = p.cost ?? Math.round(p.price * 0.68);
                 const marginPct = p.price > 0 ? Math.round(((p.price - cost) / p.price) * 100) : 0;
-                const low = p.stock > 0 && p.stock <= (p.lowStockAt ?? 10);
+                const low = getVariants(p).some(v => v.enabled !== false && variantIsLow(p, v));
                 const isPublished = p.published !== false;
                 return (
                   <tr key={p.slug} className={`transition hover:bg-stone-50/80 ${!isPublished ? "opacity-60" : ""}`}>
@@ -282,7 +287,7 @@ export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }
                         <button
                           type="button"
                           hidden={!canWriteStock}
-                          disabled={p.stock <= 0}
+                          disabled={!catalogReady || p.stock <= 0 || inventoryMode(p) === "independent"}
                           aria-label={`Decrease stock for ${p.name}`}
                           onClick={() => patchProduct(p.slug, { stock: Math.max(0, p.stock - 1) }, `Adjusted stock to ${p.stock - 1}`)}
                           className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-stone-200 bg-white text-stone-700 hover:border-stone-400 disabled:opacity-35"
@@ -299,6 +304,7 @@ export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }
                         <button
                           type="button"
                           hidden={!canWriteStock}
+                          disabled={!catalogReady || inventoryMode(p) === "independent"}
                           aria-label={`Increase stock for ${p.name}`}
                           onClick={() => patchProduct(p.slug, { stock: p.stock + 5 }, `Restocked +5 to ${p.stock + 5}`)}
                           title="Add 5 units"
@@ -307,6 +313,7 @@ export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }
                           <Icon name="plus" className="h-3.5 w-3.5" />
                         </button>
                       </div>
+                      <p className="mt-1 text-[10px] text-stone-500">{inventoryMode(p) === "independent" ? "Separate stock · edit variants" : inventoryMode(p) === "shared_units" ? "Shared pieces · auto pack stock" : "Shared item stock"}</p>
                     </td>
                     <td className="px-3 py-3">
                       {canWriteCatalog ? (<button
@@ -338,7 +345,7 @@ export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1.5">
-                        {canWriteCatalog && <IconBtn icon="edit" label={`Edit ${p.name}`} onClick={() => setEditing({ product: p, isNew: false })} />}
+                        {canWriteCatalog && <IconBtn disabled={!catalogReady} icon="edit" label={`Edit ${p.name}`} onClick={() => setEditing({ product: p, isNew: false })} />}
                         {canWriteCatalog && <IconBtn icon="duplicate" label={`Duplicate ${p.name}`} onClick={() => duplicateProduct(p)} />}
                         <Link
                           to={`/product/${p.slug}`}
@@ -371,8 +378,10 @@ export function ProductsSection({ initialQuery = "" }: { initialQuery?: string }
           categories={catalogCategories}
           canViewFinance={canViewFinance}
           onClose={() => setEditing(null)}
-          onSave={(prod) => {
-            if (upsertProduct(prod, editing.isNew)) setEditing(null);
+          onSave={async (prod) => {
+            const saved = await upsertProduct(prod, editing.isNew);
+            if (saved) setEditing(null);
+            return saved;
           }}
         />
       )}
@@ -393,45 +402,106 @@ function ProductEditorModal({
   categories: Category[];
   canViewFinance: boolean;
   onClose: () => void;
-  onSave: (p: Product) => void;
+  onSave: (p: Product) => Promise<boolean>;
 }) {
-  const [draft, setDraft] = useState<Product>(initial);
-  const [aliasText, setAliasText] = useState((initial.aliases ?? []).join(", "));
+  const canonicalAliases = (value: string) => value.split(",").map(item => item.trim()).filter(Boolean);
+  const initialProduct = normalizeProduct(initial);
+  const initialAliases = JSON.stringify(initialProduct.aliases ?? []);
+  const [draft, setDraft] = useState<Product>(() => initialProduct);
+  const [baseline, setBaseline] = useState<Product>(() => initialProduct);
+  const [baselineAliases, setBaselineAliases] = useState(initialAliases);
+  const [saving, setSaving] = useState(false);
+  const [modeConfirmed, setModeConfirmed] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const modeChanged = !isNew && inventoryMode(initial) !== inventoryMode(draft);
+  const [aliasText, setAliasText] = useState((initialProduct.aliases ?? []).join(", "));
   const [customImg, setCustomImg] = useState("");
   const [err, setErr] = useState("");
+  const compareProduct = (product: Product) => JSON.stringify({
+    ...normalizeProduct(product),
+    original: Boolean(product.original),
+    qualityNote: product.qualityNote?.trim() ?? "",
+  });
+  const isDirty = compareProduct(draft) !== compareProduct(baseline)
+    || JSON.stringify(canonicalAliases(aliasText)) !== baselineAliases
+    || Boolean(customImg.trim());
+
+  useEffect(() => {
+    const next = normalizeProduct(initial);
+    setDraft(next);
+    setBaseline(next);
+    setAliasText((next.aliases ?? []).join(", "));
+    setBaselineAliases(JSON.stringify(next.aliases ?? []));
+    setCustomImg("");
+    setErr("");
+    setModeConfirmed(false);
+    setConfirmDiscard(false);
+  }, [initial, isNew]);
+
+  const requestClose = () => {
+    if (saving) return;
+    if (isDirty) setConfirmDiscard(true);
+    else onClose();
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (saving) return;
+      if (confirmDiscard) setConfirmDiscard(false);
+      else requestClose();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  });
 
   const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
+    if (modeChanged && !modeConfirmed) { setErr("Confirm you have checked the stock for the new inventory mode."); return; }
     if (draft.name.trim().length < 3) { setErr("Enter a descriptive product name."); return; }
     if (draft.sku.trim().length < 3) { setErr("Enter a valid SKU code."); return; }
     if (draft.price <= 0) { setErr("Price must be greater than 0 BDT."); return; }
     const finalSlug = isNew ? slugify(draft.slug || draft.name) || draft.slug : draft.slug;
     const aliases = aliasText.split(",").map((s) => s.trim()).filter(Boolean);
-    onSave({
-      ...draft,
-      name: draft.name.trim(),
-      sku: draft.sku.trim().toUpperCase(),
-      slug: finalSlug,
-      short: draft.short.trim() || "Tested component ready for dispatch from Dhaka.",
-      specs: draft.specs.filter(([k, v]) => k.trim() && v.trim()),
-      aliases,
-    });
+    const inventoryIssue = productInventoryIssue(draft);
+    if (inventoryIssue) { setErr(inventoryIssue); return; }
+    setErr(""); setSaving(true);
+    try {
+      const saved = await onSave(normalizeProduct({
+        ...draft,
+        name: draft.name.trim(),
+        sku: draft.sku.trim().toUpperCase(),
+        slug: finalSlug,
+        short: draft.short.trim() || "Tested component ready for dispatch from Dhaka.",
+        specs: draft.specs.filter(([k, v]) => k.trim() && v.trim()),
+        aliases,
+      }));
+      if (!saved) setErr("Not saved. Your draft is still here; check the notification, refresh current stock if asked, and retry.");
+    } catch {
+      setErr("Save failed. Your draft is still here. Check your connection and try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/50 p-4 backdrop-blur-[2px]">
-      <div role="dialog" aria-modal="true" aria-label={isNew ? "Create SKU" : "Edit SKU"} className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/50 p-4 backdrop-blur-[2px]" onMouseDown={event => { if (event.target === event.currentTarget) requestClose(); }}>
+      <div role="dialog" aria-modal="true" aria-label={isNew ? "Create SKU" : "Edit SKU"} aria-busy={saving} className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-stone-100 px-6 py-4">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-700">{isNew ? "New product" : `Editing ${draft.sku}`}</p>
-            <h3 className="text-lg font-extrabold text-stone-900">{draft.name || "Untitled product"}</h3>
+            <div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-extrabold text-stone-900">{draft.name || "Untitled product"}</h3>{isDirty && <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800 ring-1 ring-amber-200"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />Unsaved changes</span>}{!isDirty && !isNew && <span className="text-[10px] font-medium text-stone-400">All changes saved</span>}</div>
           </div>
-          <IconBtn icon="close" label="Close editor" onClick={onClose} />
+          <IconBtn icon="close" label="Close editor" disabled={saving} onClick={requestClose} />
         </div>
 
-        <form onSubmit={submit} className="flex-1 space-y-5 overflow-y-auto p-6">
+        <form onSubmit={submit} inert={saving} className="relative flex-1 space-y-5 overflow-y-auto p-6">
+          <fieldset disabled={saving} className="contents">
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-xs sm:col-span-2">
               <span className="mb-1.5 block font-bold text-stone-700">Product Name</span>
@@ -457,8 +527,8 @@ function ProductEditorModal({
             </label>
 
             <label className="block text-xs">
-              <span className="mb-1.5 block font-bold text-stone-700">Selling Price (৳ BDT)</span>
-              <input type="number" min={1} value={draft.price} onChange={(e) => setDraft({ ...draft, price: Number(e.target.value) })} className={adminInput} required />
+              <span className="mb-1.5 block font-bold text-stone-700">{inventoryMode(draft) === "single" ? "Selling Price (৳ BDT)" : "From price · calculated from variants"}</span>
+              <input type="number" min={1} readOnly={inventoryMode(draft) !== "single"} value={inventoryMode(draft) === "single" ? draft.price : normalizeProduct(draft).price} onChange={(e) => setDraft({ ...draft, price: Number(e.target.value) })} className={adminInput} required />
             </label>
 
             <label className="block text-xs">
@@ -487,16 +557,6 @@ function ProductEditorModal({
             )}
 
             <label className="block text-xs">
-              <span className="mb-1.5 block font-bold text-stone-700">Stock on Hand</span>
-              <input type="number" min={0} value={draft.stock} onChange={(e) => setDraft({ ...draft, stock: Math.max(0, Number(e.target.value)) })} className={adminInput} />
-            </label>
-
-            <label className="block text-xs">
-              <span className="mb-1.5 block font-bold text-stone-700">Low-Stock Warning Threshold</span>
-              <input type="number" min={1} value={draft.lowStockAt ?? 10} onChange={(e) => setDraft({ ...draft, lowStockAt: Number(e.target.value) })} className={adminInput} />
-            </label>
-
-            <label className="block text-xs">
               <span className="mb-1.5 block font-bold text-stone-700">Payment method</span>
               <Select value={draft.pay} onChange={(e) => setDraft({ ...draft, pay: e.target.value as Pay })} className={adminInput}>
                 <option value="cod">Cash on Delivery (Low-risk item)</option>
@@ -504,6 +564,20 @@ function ProductEditorModal({
               </Select>
             </label>
           </div>
+
+          <ProductInventoryEditor product={draft} onChange={next => { if (inventoryMode(next) !== inventoryMode(draft)) setModeConfirmed(false); setDraft(next); }} canViewFinance={canViewFinance} modeChanged={modeChanged} confirmed={modeConfirmed} onConfirm={setModeConfirmed} />
+
+          <section className="rounded-2xl border border-stone-200 bg-white p-4" aria-label="Product authenticity">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0"><p className="text-xs font-bold text-stone-800">Authenticity</p><p className="mt-1 text-[11px] leading-relaxed text-stone-500">Only mark a product as original when its authenticity has been verified.</p></div>
+              <SwitchToggle checked={Boolean(draft.original)} label="Original product" onChange={(value) => setDraft({ ...draft, original: value })} />
+            </div>
+            {draft.original ? (
+              <span className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-bold text-emerald-800"><Icon name="check-circle" className="h-3.5 w-3.5" />Original capsule shown on product image</span>
+            ) : (
+              <label className="mt-3 block text-xs"><span className="mb-1.5 block font-bold text-stone-700">Quality / compatibility note · optional</span><input aria-label="Quality or compatibility note" value={draft.qualityNote ?? ""} onChange={event => setDraft({ ...draft, qualityNote: event.target.value })} maxLength={160} placeholder="e.g. Compatible alternative · Grade A copy" className={adminInput} /><span className="mt-1 block text-[10px] text-stone-500">Shown in product details as entered; avoid calling a non-original item “original”.</span></label>
+            )}
+          </section>
 
           <label className="block text-xs">
             <span className="mb-1.5 block font-bold text-stone-700">Short Summary (1–2 crisp lines)</span>
@@ -622,14 +696,28 @@ function ProductEditorModal({
 
           {err && <p role="alert" className="rounded-xl bg-red-50 px-3.5 py-2.5 text-xs font-semibold text-red-700">{err}</p>}
 
-          <div className="flex items-center justify-end gap-2.5 border-t border-stone-100 pt-4">
-            <button type="button" onClick={onClose} className={adminBtnGhost}>Cancel</button>
-            <button type="submit" className={adminBtnAccent}>
-              <Icon name="check" className="h-4 w-4" />
-              <span>{isNew ? "Create SKU" : "Save Changes"}</span>
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-100 pt-4">
+            <p role="status" aria-live="polite" className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${isDirty ? "text-amber-800" : "text-stone-400"}`}>
+              {isDirty ? <><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />Unsaved changes</> : isNew ? "Make a change to enable saving" : "No unsaved changes"}
+            </p>
+            <div className="flex items-center gap-2.5">
+              <button type="button" disabled={saving} onClick={requestClose} className={adminBtnGhost}>Cancel</button>
+              <button type="submit" disabled={saving || !isDirty} className={`${adminBtnAccent} disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400 disabled:shadow-none`}>
+                <Icon name={saving ? "clock" : "check"} className="h-4 w-4" />
+                <span>{saving ? "Saving to database…" : isNew ? "Create SKU" : "Save Changes"}</span>
+              </button>
+            </div>
           </div>
+          </fieldset>
         </form>
+        {confirmDiscard && <div className="absolute inset-0 z-[2] grid place-items-center bg-stone-950/40 p-4" onMouseDown={event => { if (event.target === event.currentTarget) setConfirmDiscard(false); }}>
+          <section role="alertdialog" aria-modal="true" aria-labelledby="discard-product-title" aria-describedby="discard-product-description" className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-50 text-amber-700"><Icon name="alert" className="h-5 w-5" /></div>
+            <h4 id="discard-product-title" className="mt-3 text-base font-extrabold text-stone-900">Discard unsaved changes?</h4>
+            <p id="discard-product-description" className="mt-1.5 text-sm leading-relaxed text-stone-600">Your changes to <strong>{draft.name || "this new product"}</strong> haven’t been saved. Keep editing or discard this draft.</p>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" autoFocus onClick={() => setConfirmDiscard(false)} className={adminBtnGhost}>Keep editing</button><button type="button" onClick={onClose} className="admin-button admin-button-danger">Discard changes</button></div>
+          </section>
+        </div>}
       </div>
     </div>
   );

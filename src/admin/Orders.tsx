@@ -14,8 +14,8 @@ type Filters = { q: string; queue: Queue; payment: string; courier: string; date
 const DEFAULT_FILTERS: Filters = { q: "", queue: "all", payment: "all", courier: "all", date: "all", sort: "newest" };
 const bdtDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" });
 const isUnfulfilled = (o: Order) => ["placed", "confirmed", "packed"].includes(o.status ?? "placed");
-const isIssue = (o: Order) => o.status !== "delivered" && o.status !== "cancelled" && ((Date.now() - o.created > 2 * 86400000) || o.paymentStatus === "verifying");
-const inQueue = (o: Order, queue: Queue) => queue === "all" || (queue === "unfulfilled" && isUnfulfilled(o)) || (queue === "unpaid" && o.paymentStatus === "verifying") || (queue === "ready" && o.status === "packed") || (queue === "shipped" && o.status === "shipped") || (queue === "issues" && isIssue(o));
+const isIssue = (o: Order, at: number) => o.status !== "delivered" && o.status !== "cancelled" && ((at - o.created > 2 * 86400000) || o.paymentStatus === "verifying");
+const inQueue = (o: Order, queue: Queue, at: number) => queue === "all" || (queue === "unfulfilled" && isUnfulfilled(o)) || (queue === "unpaid" && o.paymentStatus === "verifying") || (queue === "ready" && o.status === "packed") || (queue === "shipped" && o.status === "shipped") || (queue === "issues" && isIssue(o, at));
 
 const statusHint: Record<string, string> = {
   placed: "Waiting for confirmation",
@@ -68,6 +68,7 @@ export function OrdersSection({ initialQuery = "" }: { initialQuery?: string }) 
   const [skippedResults, setSkippedResults] = useState<{ id: string; reason: string }[]>([]);
   const [dense, setDense] = useState(false);
   const query = useDeferredValue(filters.q);
+  const [auditNow] = useState(() => Date.now());
   const canWrite = can("orders.write");
   useEffect(() => { if (initialQuery) { setFilters(f => ({ ...f, q: initialQuery })); setPage(1); } }, [initialQuery]);
   useEffect(() => { setSelected([]); setOpenId(null); }, [canWrite, can("orders.payment")]);
@@ -75,10 +76,10 @@ export function OrdersSection({ initialQuery = "" }: { initialQuery?: string }) 
   const change = (patch: Partial<Filters>) => { setFilters(f => ({ ...f, ...patch })); setPage(1); setSelected([]); setResult(""); setSkippedResults([]); };
   const filtered = useMemo(() => {
     const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-    const today = filters.date === "today" ? bdtDay.format(Date.now()) : "";
-    const cutoff = filters.date !== "all" && filters.date !== "today" ? Date.now() - Number(filters.date) * 86400000 : 0;
+    const today = filters.date === "today" ? bdtDay.format(auditNow) : "";
+    const cutoff = filters.date !== "all" && filters.date !== "today" ? auditNow - Number(filters.date) * 86400000 : 0;
     return orders.filter(order => {
-      if (!inQueue(order, filters.queue)) return false;
+      if (!inQueue(order, filters.queue, auditNow)) return false;
       if (filters.payment !== "all" && order.paymentStatus !== filters.payment) return false;
       if (filters.courier !== "all" && (order.courier ?? "Unassigned") !== filters.courier) return false;
       if (today && bdtDay.format(order.created) !== today) return false;
@@ -87,7 +88,7 @@ export function OrdersSection({ initialQuery = "" }: { initialQuery?: string }) 
       const hay = `${order.id} ${order.name} ${order.phone} ${order.trackingCode ?? ""} ${order.lines.map(l => l.name).join(" ")}`.toLowerCase();
       return terms.every(t => hay.includes(t));
     }).sort((a, b) => filters.sort === "oldest" ? a.created - b.created : filters.sort === "value" ? b.total - a.total : b.created - a.created);
-  }, [orders, query, filters.queue, filters.payment, filters.courier, filters.date, filters.sort]);
+  }, [orders, query, filters.queue, filters.payment, filters.courier, filters.date, filters.sort, auditNow]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const pageOrders = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -103,10 +104,10 @@ export function OrdersSection({ initialQuery = "" }: { initialQuery?: string }) 
       if (order.status === "packed") totals.ready++;
       if (order.paymentStatus === "verifying") totals.unpaid++;
       if (order.status === "shipped") totals.shipped++;
-      if (isIssue(order)) totals.issues++;
+      if (isIssue(order, auditNow)) totals.issues++;
     }
     return totals;
-  }, [orders]);
+  }, [orders, auditNow]);
 
   const selectOne = (id: string) => setSelected(ids => ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]);
   const togglePage = () => setSelected(ids => {
@@ -124,7 +125,7 @@ export function OrdersSection({ initialQuery = "" }: { initialQuery?: string }) 
     const rows = exportIds ? orders.filter(o => exportIds.has(o.id)) : filtered;
     downloadCsv(`orders-${new Date().toISOString().slice(0, 10)}.csv`, [
       ["Order", "Date BDT", "Name", "Phone", "Address", "Area", "Status", "Payment method", "Payment status", "Courier", "Tracking", "Total BDT", "Items"],
-      ...rows.map(o => [o.id, `${orderDate(o.created)} ${orderTime(o.created)}`, o.name, o.phone, o.address, o.city, o.status ?? "placed", o.method, o.paymentStatus ?? "cod_pending", o.courier ?? "Unassigned", o.trackingCode ?? "", o.total, o.lines.map(l => `${l.name} x${l.qty}`).join("; ")]),
+      ...rows.map(o => [o.id, `${orderDate(o.created)} ${orderTime(o.created)}`, o.name, o.phone, o.address, o.city, o.status ?? "placed", o.method, o.paymentStatus ?? "cod_pending", o.courier ?? "Unassigned", o.trackingCode ?? "", o.total, o.lines.map(l => `${l.name}${l.variantLabel ? ` (${l.variantLabel})` : ""} x${l.qty}`).join("; ")]),
     ]);
     notify(`Exported ${rows.length} orders`);
   };
@@ -185,7 +186,7 @@ export function OrdersSection({ initialQuery = "" }: { initialQuery?: string }) 
           <td><button className="admin-order-id" onClick={() => setOpenId(order.id)}>{order.id}</button>{order.batchId && <span className="admin-batch-chip">{order.batchId}</span>}<span className="admin-cell-sub">{orderDate(order.created)} <span className="text-stone-400">{orderTime(order.created)}</span></span></td>
           <td><div className="flex items-center gap-2"><span className="admin-customer-avatar hidden 2xl:inline-flex">{order.name.split(" ").map(n => n[0]).slice(0, 2).join("")}</span><div><button className="admin-cell-title" onClick={() => setOpenId(order.id)}>{order.name}</button><span className="admin-cell-sub">{order.city === "dhaka" ? "Dhaka" : "Outside Dhaka"}{order.priority === "high" && <span className="ml-2 text-amber-700">Priority</span>}</span></div></div></td>
           <td><StatusControl order={order} payment onChange={value => mutate(order, { paymentStatus: value as PaymentStatus })} /><span className="admin-cell-sub">{order.method === "bkash" ? "bKash" : order.method === "nagad" ? "Nagad" : order.method === "cod" ? "Cash on delivery" : "Advance delivery"}</span></td>
-          <td><StatusControl order={order} onChange={value => mutate(order, { status: value as OrderStatus })} /><span className="admin-cell-sub">{order.lines.reduce((s, l) => s + l.qty, 0)} {order.lines.reduce((s, l) => s + l.qty, 0) === 1 ? "item" : "items"}{isIssue(order) && <span className="ml-2 text-amber-700">Needs review</span>}</span></td>
+          <td><StatusControl order={order} onChange={value => mutate(order, { status: value as OrderStatus })} /><span className="admin-cell-sub">{order.lines.reduce((s, l) => s + l.qty, 0)} {order.lines.reduce((s, l) => s + l.qty, 0) === 1 ? "item" : "items"}{isIssue(order, auditNow) && <span className="ml-2 text-amber-700">Needs review</span>}</span></td>
           <td><span className={order.courier && order.courier !== "Unassigned" ? "admin-cell-title" : "text-stone-400"}>{order.courier ?? "Unassigned"}</span><span className="admin-cell-sub font-mono">{order.trackingCode || "Not booked"}</span></td>
           <td className="text-right"><strong className="font-semibold tnum">{fmt(order.total)}</strong></td><td><button className="admin-icon-button" aria-label={`Open ${order.id}`} onClick={() => setOpenId(order.id)}><Icon name="chevron-right" className="h-4 w-4" /></button></td>
         </tr>)}</tbody></table>}
@@ -240,7 +241,7 @@ function OrderDrawer({ order, index, count, onClose, onNavigate, onStatus }: { o
     {canWrite && next && <button className="admin-button admin-order-next" onClick={() => changeStatus({ status: next })}><Icon name={next === "shipped" ? "truck" : "check-circle"} className="h-4 w-4" /><span>{"action" in meta ? meta.action : "Update order"}</span><Icon name="arrow-right" className="ml-auto h-4 w-4" /></button>}
     <div className="admin-tabs admin-drawer-tabs" role="tablist" aria-label="Order details"><button role="tab" aria-selected={tab === "details"} onClick={() => setTab("details")}>Details</button><button role="tab" aria-selected={tab === "activity"} onClick={() => setTab("activity")}>Activity <span>{(order.events ?? []).length + 1}</span></button></div>
     {tab === "details" ? <div className="admin-drawer-sections">
-      <section><div className="admin-section-title"><h3>Items</h3><span>{order.lines.reduce((s, l) => s + l.qty, 0)} units</span></div><div className="admin-order-items">{order.lines.map(line => { const p = findProduct(line.slug, true); return <div key={line.slug}><ResponsiveImage src={p?.images[0] ?? "/img/kit.jpg"} alt="" sizes="39px" /><div className="min-w-0 flex-1"><p>{line.name}</p><small>{p?.sku ?? line.slug}</small></div><span className="text-xs text-stone-500">x{line.qty}</span><strong>{fmt(line.price * line.qty)}</strong></div>; })}</div><dl className="admin-order-totals"><div><dt>Subtotal</dt><dd>{fmt(order.subtotal)}</dd></div><div><dt>Delivery</dt><dd>{order.shipping ? fmt(order.shipping) : "Free"}</dd></div>{order.discount > 0 && <div><dt>Discount</dt><dd>-{fmt(order.discount)}</dd></div>}<div className="total"><dt>Total</dt><dd>{fmt(order.total)}</dd></div></dl></section>
+      <section><div className="admin-section-title"><h3>Items</h3><span>{order.lines.reduce((s, l) => s + l.qty * (l.unitsPerPack ?? 1), 0)} pieces</span></div><div className="admin-order-items">{order.lines.map(line => { const p = findProduct(line.slug, true); return <div key={`${line.slug}::${line.variantId ?? line.unitsPerPack ?? 1}`}><ResponsiveImage src={p?.images[0] ?? "/img/kit.jpg"} alt="" sizes="39px" /><div className="min-w-0 flex-1"><p>{line.name}</p><small>{p?.sku ?? line.slug}{line.variantLabel ? ` · ${line.variantLabel}` : ""}</small></div><span className="text-xs text-stone-500">x{line.qty}</span><strong>{fmt(line.price * line.qty)}</strong></div>; })}</div><dl className="admin-order-totals"><div><dt>Subtotal</dt><dd>{fmt(order.subtotal)}</dd></div><div><dt>Delivery</dt><dd>{order.shipping ? fmt(order.shipping) : "Free"}</dd></div>{order.discount > 0 && <div><dt>Discount</dt><dd>-{fmt(order.discount)}</dd></div>}<div className="total"><dt>Total</dt><dd>{fmt(order.total)}</dd></div></dl></section>
       <section><div className="admin-section-title"><h3>Customer</h3><a className="admin-text-button" href={`tel:${order.phone}`}><Icon name="phone" className="h-3.5 w-3.5" />Call</a></div>{canWrite ? <div className="grid grid-cols-2 gap-3"><Field label="Full name"><input className="admin-input" value={draft.name} onChange={e => set("name", e.target.value)} /></Field><Field label="Phone number"><input className="admin-input" inputMode="tel" value={draft.phone} onChange={e => set("phone", e.target.value)} /></Field><div className="col-span-2"><Field label="Delivery address"><textarea className="admin-input" rows={2} value={draft.address} onChange={e => set("address", e.target.value)} /></Field></div><Field label="Delivery area"><Select className="admin-input" value={draft.city} onChange={e => set("city", e.target.value)}><option value="dhaka">Inside Dhaka</option><option value="outside">Outside Dhaka</option></Select></Field><Field label="Priority"><Select className="admin-input" value={draft.priority} onChange={e => set("priority", e.target.value)}><option value="normal">Normal</option><option value="high">High priority</option></Select></Field></div> : <div className="text-sm leading-relaxed text-stone-600"><p className="font-medium text-stone-900">{order.name}</p><p>{order.phone}</p><p>{order.address}</p></div>}</section>
       <section><div className="admin-section-title"><h3>Delivery & assignment</h3><Icon name="truck" className="h-4 w-4 text-stone-400" /></div>{canWrite ? <div className="grid grid-cols-2 gap-3"><Field label="Courier"><Select aria-label="Courier service" className="admin-input" value={draft.courier} onChange={e => set("courier", e.target.value)}>{COURIERS.map(c => <option key={c}>{c}</option>)}</Select></Field><Field label="Tracking number"><input aria-label="Courier tracking code" className="admin-input" value={draft.trackingCode} onChange={e => set("trackingCode", e.target.value)} placeholder="e.g. SF-104822" /></Field><div className="col-span-2"><Field label="Assigned to"><Select className="admin-input" value={draft.assignee} onChange={e => set("assignee", e.target.value)}><option value="">Unassigned</option>{staff.filter(s => s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></Field></div></div> : <p className="text-sm text-stone-600">{order.courier ?? "Unassigned"}{order.trackingCode ? ` / ${order.trackingCode}` : ""}</p>}{order.batchId && <p className="mb-2 text-xs text-stone-500">Batch <span className="font-mono">{order.batchId}</span> · <Link to="/admin/dispatch" className="admin-text-button">Open dispatch</Link></p>}
       <Link to={`/track?id=${order.id}&phone=${order.phone}`} className="admin-text-button mt-3 inline-flex">Open tracking page<Icon name="external" className="h-3.5 w-3.5" /></Link></section>

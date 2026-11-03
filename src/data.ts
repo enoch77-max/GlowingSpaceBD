@@ -2,7 +2,28 @@ import type { IconName } from "./icons";
 
 export type Pay = "cod" | "prepay";
 
+export type InventoryMode = "single" | "shared_units" | "independent" | "shared_stock";
+
+export interface ProductVariant {
+  id: string;
+  label: string;
+  unitsPerPack: number;
+  price: number;
+  compareAtPrice?: number;
+  stock?: number;
+  lowStockAt?: number;
+  cost?: number;
+  enabled?: boolean;
+}
+
 export interface Product {
+  inventoryMode?: InventoryMode;
+  variants?: ProductVariant[];
+  inventoryVersion?: number;
+  /** Show an authenticity badge only when this is explicitly enabled. */
+  original?: boolean;
+  /** Customer-facing quality/compatibility note for non-original products. */
+  qualityNote?: string;
   slug: string;
   sku: string;
   name: string;
@@ -210,7 +231,7 @@ export const defaultSettings: StoreSettings = {
   storeName: "Glowing Space BD",
   announcementText: "Free Dhaka delivery over ৳1,500",
   supportHours: "Support 10am–8pm",
-  whatsappNumber: import.meta.env.VITE_WHATSAPP_NUMBER || "8801700000000",
+  whatsappNumber: process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "8801700000000",
   dispatchHourBdt: 16,
   showDispatchCountdown: true,
   dhakaDeliveryFee: 70,
