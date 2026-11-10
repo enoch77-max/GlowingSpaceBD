@@ -3,16 +3,25 @@ export type AdminRole = "owner" | "manager" | "fulfillment" | "support";
 export type Permission =
   | "analytics.read"
   | "finance.read"
+  | "reports.read"
   | "orders.read"
   | "orders.write"
   | "orders.payment"
   | "dispatch.manage"
   | "orders.note"
+  | "returns.manage"
+  | "customers.read"
+  | "reviews.moderate"
+  | "messages.read"
   | "catalog.read"
   | "catalog.write"
   | "inventory.write"
   | "storefront.write"
+  | "content.write"
   | "marketing.write"
+  | "delivery.write"
+  | "payments.write"
+  | "media.write"
   | "settings.write"
   | "team.manage"
   | "audit.read"
@@ -37,9 +46,11 @@ export const ROLE_DEFINITIONS: Record<AdminRole, RoleDefinition> = {
     badgeCls: "bg-amber-100 text-amber-950 ring-amber-300/80",
     dotCls: "bg-amber-500",
     permissions: [
-      "analytics.read", "finance.read", "orders.read", "orders.write", "orders.payment", "orders.note", "dispatch.manage",
-      "catalog.read", "catalog.write", "inventory.write", "storefront.write",
-      "marketing.write", "settings.write", "team.manage", "audit.read", "secrets.manage",
+      "analytics.read", "finance.read", "reports.read", "orders.read", "orders.write", "orders.payment", "orders.note", "dispatch.manage", "returns.manage",
+      "customers.read", "reviews.moderate", "messages.read",
+      "catalog.read", "catalog.write", "inventory.write", "storefront.write", "content.write",
+      "marketing.write", "delivery.write", "payments.write", "media.write",
+      "settings.write", "team.manage", "audit.read", "secrets.manage",
     ],
   },
   manager: {
@@ -50,9 +61,11 @@ export const ROLE_DEFINITIONS: Record<AdminRole, RoleDefinition> = {
     badgeCls: "bg-emerald-50 text-emerald-900 ring-emerald-200",
     dotCls: "bg-emerald-500",
     permissions: [
-      "analytics.read", "finance.read", "orders.read", "orders.write", "orders.payment", "orders.note", "dispatch.manage",
-      "catalog.read", "catalog.write", "inventory.write", "storefront.write",
-      "marketing.write", "settings.write", "audit.read",
+      "analytics.read", "finance.read", "reports.read", "orders.read", "orders.write", "orders.payment", "orders.note", "dispatch.manage", "returns.manage",
+      "customers.read", "reviews.moderate", "messages.read",
+      "catalog.read", "catalog.write", "inventory.write", "storefront.write", "content.write",
+      "marketing.write", "delivery.write", "payments.write", "media.write",
+      "settings.write", "audit.read",
     ],
   },
   fulfillment: {
@@ -63,8 +76,9 @@ export const ROLE_DEFINITIONS: Record<AdminRole, RoleDefinition> = {
     badgeCls: "bg-sky-50 text-sky-900 ring-sky-200",
     dotCls: "bg-sky-500",
     permissions: [
-      "analytics.read", "orders.read", "orders.write", "orders.note", "dispatch.manage",
-      "catalog.read", "inventory.write",
+      "analytics.read", "orders.read", "orders.write", "orders.note", "dispatch.manage", "returns.manage",
+      "customers.read", "messages.read",
+      "catalog.read", "inventory.write", "media.write",
     ],
   },
   support: {
@@ -75,7 +89,7 @@ export const ROLE_DEFINITIONS: Record<AdminRole, RoleDefinition> = {
     badgeCls: "bg-violet-50 text-violet-900 ring-violet-200",
     dotCls: "bg-violet-500",
     permissions: [
-      "orders.read", "orders.note", "catalog.read",
+      "orders.read", "orders.note", "returns.manage", "customers.read", "reviews.moderate", "messages.read", "catalog.read",
     ],
   },
 };
@@ -83,17 +97,26 @@ export const ROLE_DEFINITIONS: Record<AdminRole, RoleDefinition> = {
 export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[] = [
   { key: "analytics.read", label: "View sales & traffic analytics", group: "Analytics" },
   { key: "finance.read", label: "View unit cost, profit margins & capital", group: "Analytics" },
+  { key: "reports.read", label: "View sales, product, customer & order reports", group: "Analytics" },
   { key: "orders.read", label: "View customer orders & timelines", group: "Orders" },
   { key: "orders.write", label: "Update order status, payment & courier", group: "Orders" },
   { key: "orders.payment", label: "Verify payments and record refunds", group: "Orders" },
   { key: "dispatch.manage", label: "Create batches, pack and request courier pickups", group: "Orders" },
   { key: "orders.note", label: "Write internal order notes", group: "Orders" },
-  { key: "catalog.read", label: "Inspect products, SKUs & specs", group: "Catalog" },
-  { key: "catalog.write", label: "Create/edit products, prices & COD policy", group: "Catalog" },
+  { key: "returns.manage", label: "Approve / reject return requests", group: "Orders" },
+  { key: "customers.read", label: "View customers, groups & addresses", group: "Customers" },
+  { key: "reviews.moderate", label: "Approve / reject product reviews", group: "Customers" },
+  { key: "messages.read", label: "Read contact messages", group: "Customers" },
+  { key: "catalog.read", label: "Inspect products, categories, brands & attributes", group: "Catalog" },
+  { key: "catalog.write", label: "Create/edit products, prices & categories", group: "Catalog" },
   { key: "inventory.write", label: "Adjust stock counts & restock levels", group: "Catalog" },
-  { key: "storefront.write", label: "Control Hero slides, ticker & FAQs", group: "Storefront" },
-  { key: "marketing.write", label: "Manage discount coupons", group: "Marketing" },
-  { key: "settings.write", label: "Edit delivery fees & checkout rules", group: "Platform" },
+  { key: "storefront.write", label: "Control hero slides, homepage sections & banners", group: "Storefront" },
+  { key: "content.write", label: "Edit pages, blog posts & testimonials", group: "Storefront" },
+  { key: "marketing.write", label: "Manage coupons, discounts & flash sales", group: "Marketing" },
+  { key: "delivery.write", label: "Manage delivery providers, zones & charges", group: "Delivery" },
+  { key: "payments.write", label: "Manage payment methods & transactions", group: "Payments" },
+  { key: "media.write", label: "Upload & organize media library", group: "Content" },
+  { key: "settings.write", label: "Edit store, SEO, tax & shipping settings", group: "Platform" },
   { key: "team.manage", label: "Manage staff accounts & roles", group: "Security" },
   { key: "audit.read", label: "Inspect administrative audit trail", group: "Security" },
   { key: "secrets.manage", label: "Write/rotate backend-only API secrets", group: "Security" },

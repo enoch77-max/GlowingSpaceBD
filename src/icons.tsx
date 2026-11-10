@@ -11,7 +11,7 @@ export type IconName =
   | "chart" | "trend-up" | "key" | "eye" | "eye-off" | "users" | "settings"
   | "edit" | "layers" | "terminal" | "server" | "download" | "logout" | "duplicate" | "archive"
   | "calendar" | "filter" | "more" | "printer" | "undo" | "arrow-down"
-  | "beaker" | "package" | "gauge" | "truck-fast";
+  | "beaker" | "package" | "gauge" | "truck-fast" | "percent" | "image";
 
 const P: Record<IconName, ReactElement> = {
   search: <><circle cx="11" cy="11" r="6.8" /><path d="m16.2 16.2 4.3 4.3" /></>,
@@ -94,6 +94,8 @@ const P: Record<IconName, ReactElement> = {
   package: <><path d="M21 7.6v8.8L12 21l-9-4.6V7.6L12 3Z" /><path d="M3 7.6 12 12l9-4.4M12 12v9" /><path d="m7.5 5.4 9 4.6v4.8" /></>,
   gauge: <><path d="M4.5 15.5a8 8 0 1 1 15 0" /><path d="M12 15.5 16.2 10" /><circle cx="12" cy="15.5" r="1.4" /></>,
   "truck-fast": <><path d="M1.8 9.5h3.2M1 13.5h3.2" /><path d="M7.5 6.5h8.5v10h-8.5z" /><path d="M16 10h2.4l2.6 2.8v3.7h-5" /><circle cx="10.5" cy="18.3" r="1.7" /><circle cx="18.3" cy="18.3" r="1.7" /></>,
+  percent: <><path d="M19 5 5 19" /><circle cx="7.2" cy="7.2" r="2.7" /><circle cx="16.8" cy="16.8" r="2.7" /></>,
+  image: <><rect x="3" y="4.5" width="18" height="15" rx="2.4" /><circle cx="8.6" cy="9.6" r="1.7" /><path d="m5 18 5-5 3.5 3.5L17 13l4 4.5" /></>,
 };
 
 const FILLED: IconName[] = ["star", "whatsapp", "bolt", "play", "pause"];

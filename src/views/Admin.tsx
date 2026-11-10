@@ -5,7 +5,9 @@ import { Icon } from "../icons";
 import { useSeo } from "../seo";
 import { ROLE_DEFINITIONS, type AdminRole } from "../admin/rbac";
 import { ADMIN_NAV, adminHref } from "../admin/navigation";
-import { ProductsSection, StorefrontSection } from "../admin/AdminSections";
+import { ProductsSection } from "../admin/AdminSections";
+import { ContentDraftProvider, ReturnsSection, CustomersSection, ReviewsSection, MessagesSection, CategoriesSection, BrandsSection, AttributesSection, TagsSection, DiscountsSection, BannersSection, FlashSaleSection, NewsletterSection, TestimonialsSection, HomeSectionsSection, PagesSection, BlogSection, MediaSection, ProvidersSection, ZonesSection, TrackingSection, PayMethodsSection, PaySettingsSection, TransactionsSection, ReportsSection } from "../admin/CommerceAdmin";
+import { SettingsSection, SystemSection, RolesSection } from "../admin/SettingsAdmin";
 import { OrdersSection } from "../admin/Orders";
 import { DispatchPage } from "../admin/Dispatch";
 import { CouponsSection, CheckoutSettings } from "../admin/Promotions";
@@ -17,6 +19,10 @@ import { waitingOrder } from "../admin/batches";
 import "../admin/admin.css";
 
 export function AdminPage({ sectionParam }: { sectionParam?: string }) {
+  return <ContentDraftProvider><AdminWorkspace sectionParam={sectionParam} /></ContentDraftProvider>;
+}
+
+function AdminWorkspace({ sectionParam }: { sectionParam?: string }) {
   const { currentAdmin, staff, signInAdmin, signOutAdmin, switchAdminRole, can, orders, catalogProducts } = useStore();
   const { path, search, go } = useRouter();
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -107,7 +113,7 @@ export function AdminPage({ sectionParam }: { sectionParam?: string }) {
       <Link to={destination} className="admin-brand-link"><Brand /></Link>
       <div className="admin-store-switch"><span className="admin-store-symbol">G</span><div><strong>Glowing Space BD</strong><small>Store workspace</small></div><span className="admin-local-dot" /></div>
       <nav aria-label="Admin sections">
-        {["Workspace", "Manage", "Administration"].map((group) => {
+        {["Workspace", "Catalog", "Marketing", "Content", "Delivery", "Payments", "Reports", "Settings", "Administration"].map((group) => {
           const items = allowedNav.filter((item) => item.group === group);
           if (!items.length) return null;
           return (
@@ -195,10 +201,35 @@ export function AdminPage({ sectionParam }: { sectionParam?: string }) {
           {active?.key === "overview" && <Overview />}
           {active?.key === "orders" && <OrdersSection initialQuery={search.get("q") ?? ""} />}
           {active?.key === "dispatch" && <DispatchPage />}
+          {active?.key === "returns" && <ReturnsSection />}
+          {active?.key === "customers" && <CustomersSection />}
+          {active?.key === "reviews" && <ReviewsSection />}
+          {active?.key === "messages" && <MessagesSection />}
           {active?.key === "products" && <ProductsSection key={`products-${search.get("q") ?? ""}`} initialQuery={search.get("q") ?? ""} />}
-          {active?.key === "storefront" && <StorefrontSection />}
+          {active?.key === "categories" && <CategoriesSection />}
+          {active?.key === "brands" && <BrandsSection />}
+          {active?.key === "attributes" && <AttributesSection />}
+          {active?.key === "tags" && <TagsSection />}
           {active?.key === "coupons" && <CouponsSection />}
-          {active?.key === "settings" && <CheckoutSettings />}
+          {active?.key === "discounts" && <DiscountsSection />}
+          {active?.key === "banners" && <BannersSection />}
+          {active?.key === "flash" && <FlashSaleSection />}
+          {active?.key === "newsletter" && <NewsletterSection />}
+          {active?.key === "home-sections" && <HomeSectionsSection />}
+          {active?.key === "pages" && <PagesSection />}
+          {active?.key === "blog" && <BlogSection />}
+          {active?.key === "testimonials" && <TestimonialsSection />}
+          {active?.key === "media" && <MediaSection />}
+          {active?.key === "providers" && <ProvidersSection />}
+          {active?.key === "zones" && <ZonesSection />}
+          {active?.key === "tracking" && <TrackingSection />}
+          {active?.key === "pay-methods" && <PayMethodsSection />}
+          {active?.key === "pay-settings" && <PaySettingsSection />}
+          {active?.key === "transactions" && <TransactionsSection />}
+          {active?.key === "reports" && <ReportsSection />}
+          {active?.key === "settings" && <SettingsSection />}
+          {active?.key === "system" && <SystemSection />}
+          {active?.key === "roles" && <RolesSection />}
           {active?.key === "secrets" && <VaultSection />}
           {active?.key === "team" && <TeamSection />}
           {active?.key === "audit" && <AuditSection />}

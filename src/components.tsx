@@ -70,32 +70,48 @@ export function QtyStepper({ qty, setQty, max = 99, small = false }: { qty: numb
 /* ---------- product card ---------- */
 
 export function ProductCard({ p }: { p: Product }) {
-  const { add, categoryLabel } = useStore();
+  const { add, categoryLabel, wishlist, compare, toggleWishlist, toggleCompare } = useStore();
   const { go } = useRouter();
+  const [quickView, setQuickView] = useState(false);
   const activeVariants = getVariants(p).filter((variant) => variant.enabled !== false);
   const hasOptions = activeVariants.length > 1;
   const available = productAvailable(p);
-  const someLow = activeVariants.some((variant) => variantIsLow(p, variant));
   const cheapest = [...activeVariants].sort((a, b) => a.price - b.price)[0];
-  const comparison = cheapest ? variantComparison(p, cheapest) : undefined;
   const saving = cheapest ? variantSavings(p, cheapest) : { amount: 0, percent: 0 };
+  const hasDiscount = saving.amount > 0 && !p.original;
+  const wished = wishlist.includes(p.slug);
+  const comparing = compare.includes(p.slug);
 
   return (
     <article className="group relative flex min-w-0 flex-col transition duration-300 ease-out hover:-translate-y-1">
-      <Link to={`/product/${p.slug}`} className="relative block aspect-square overflow-hidden rounded-[18px] bg-[#efede8]">
-        <ResponsiveImage src={p.images[0]} alt={p.name} loading="lazy" width={400} height={400} sizes="(max-width: 639px) 50vw, (max-width: 1023px) 33vw, 25vw"
-          className="h-full w-full object-cover transition duration-500 ease-out group-hover:scale-[1.04]" />
-        {p.original && (
-          <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-md bg-[#e5f0e5] px-2 py-1 text-[10px] font-bold leading-none text-[#275e43]">
-            <Icon name="check-circle" className="h-3 w-3" />Original
-          </span>
-        )}
-        {!available && <div className="absolute inset-0 grid place-items-center bg-white/55 backdrop-blur-[1px]"><span className="rounded-full bg-stone-900 px-3 py-1.5 text-[11px] font-semibold text-white">Sold out</span></div>}
-      </Link>
+      <div className="relative block aspect-square overflow-hidden rounded-[18px] bg-[#efede8]">
+        <Link to={`/product/${p.slug}`} aria-label={p.name}>
+          <img src={p.images[0]} alt={p.name} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:opacity-0" />
+          {p.images[1] && <img src={p.images[1]} alt="" loading="lazy" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover opacity-0 transition duration-500 group-hover:opacity-100" />}
+        </Link>
+        <div className="absolute left-2.5 top-2.5 flex flex-col items-start gap-1">
+          {hasDiscount && <span className="rounded-md bg-stone-900 px-2 py-0.5 text-[10px] font-extrabold text-white">-{saving.percent}%</span>}
+          {p.isNew && <span className="rounded-md bg-[#5b8dd9] px-2 py-0.5 text-[10px] font-extrabold text-white">New</span>}
+          {!available && <span className="rounded-md bg-white/95 px-2 py-0.5 text-[10px] font-bold text-stone-700 ring-1 ring-stone-200">Sold out</span>}
+        </div>
+        <div className="absolute right-2.5 top-2.5 flex translate-y-1 flex-col gap-1.5 opacity-0 transition duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+          <button type="button" onClick={() => toggleWishlist(p.slug)} aria-label={wished ? `Remove ${p.name} from wishlist` : `Add ${p.name} to wishlist`} title="Wishlist"
+            className={`grid h-8 w-8 place-items-center rounded-full shadow-sm ring-1 transition ${wished ? "bg-[#e5484d] text-white ring-[#e5484d]" : "bg-white text-stone-700 ring-stone-200 hover:bg-stone-100"}`}>
+            <Icon name="heart" className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => setQuickView(true)} aria-label={`Quick view ${p.name}`} title="Quick view" className="grid h-8 w-8 place-items-center rounded-full bg-white text-stone-700 shadow-sm ring-1 ring-stone-200 transition hover:bg-stone-100">
+            <Icon name="eye" className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => toggleCompare(p.slug)} aria-label={comparing ? `Remove ${p.name} from compare` : `Compare ${p.name}`} title="Compare" disabled={compare.length >= 4 && !comparing}
+            className={`grid h-8 w-8 place-items-center rounded-full shadow-sm ring-1 transition disabled:opacity-40 ${comparing ? "bg-stone-900 text-white ring-stone-900" : "bg-white text-stone-700 ring-stone-200 hover:bg-stone-100"}`}>
+            <Icon name="sliders" className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
 
       <div className="flex min-w-0 flex-1 flex-col pt-3">
         <div className="flex min-w-0 items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-[10.5px] font-medium text-stone-500">{categoryLabel(p.category)}</span>
+          <span className="min-w-0 truncate text-[10.5px] font-medium text-stone-500">{p.brand ? p.brand : categoryLabel(p.category)}</span>
           <span aria-label={`Rated ${p.rating.toFixed(1)} out of 5, ${p.reviews} reviews`} title={`${p.rating.toFixed(1)} · ${p.reviews} reviews`} className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-stone-700">
             <Icon name="star" className="h-3 w-3 text-amber-500" />{p.rating.toFixed(1)}
           </span>
@@ -103,25 +119,77 @@ export function ProductCard({ p }: { p: Product }) {
         <Link to={`/product/${p.slug}`} className="mt-1.5 line-clamp-2 min-h-[2.45rem] text-[13.5px] font-semibold leading-[1.4] text-stone-900 transition hover:text-stone-600 sm:text-sm">
           {p.name}
         </Link>
-
         <div className="mt-auto grid min-h-11 grid-cols-[minmax(0,1fr)_40px] items-end gap-x-2 pt-2">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 leading-tight">
             {hasOptions && <span className="text-[10px] font-medium text-stone-500">From</span>}
             <span className="min-w-0 text-[15px] font-extrabold tracking-tight text-stone-900 tnum [overflow-wrap:anywhere]">{fmt(p.price)}</span>
-            {comparison && <span className="min-w-0 text-[11px] text-stone-400 line-through tnum [overflow-wrap:anywhere]">{fmt(comparison)}</span>}
+            {hasDiscount && <span className="min-w-0 text-[11px] text-stone-400 line-through tnum [overflow-wrap:anywhere]">{fmt(cheapest ? variantComparison(p, cheapest)! : p.price)}</span>}
           </div>
-          <button type="button" onClick={(e) => { if (hasOptions) { go(`/product/${p.slug}`); return; } if (add(p.slug)) flyToCart(e.currentTarget.closest("article")?.querySelector("img") ?? null, p.images[0]); }} disabled={!available} aria-label={hasOptions ? `Choose options for ${p.name}` : `Add ${p.name} to cart`}
+          <button type="button" disabled={!available} aria-label={hasOptions ? `Choose options for ${p.name}` : `Add ${p.name} to cart`}
+            onClick={(e) => { if (hasOptions) { go(`/product/${p.slug}`); return; } if (add(p.slug)) flyToCart(e.currentTarget.closest("article")?.querySelector("img") ?? null, p.images[0]); }}
             className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eeece7] text-stone-800 transition duration-200 hover:bg-stone-900 hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">
-            <Icon name="plus" className="h-4 w-4" />
+            <Icon name="bag" className="h-4 w-4" />
           </button>
         </div>
-        <div className="mt-1.5 flex min-h-[15px] flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-medium leading-tight">
-          {available && someLow && <span className="inline-flex min-w-0 items-center gap-1 text-[#a36525]"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#d99b42]" />Low stock</span>}
-          {saving.amount > 0 && <span className="text-[#527455]">Save {fmt(saving.amount)}</span>}
-          {hasOptions && <span className="text-stone-500">{activeVariants.length} options</span>}
+      </div>
+      {quickView && <QuickView slug={p.slug} onClose={() => setQuickView(false)} />}
+    </article>
+  );
+}
+
+/** Quick-view modal: image, price, rating, variant pick, add to cart — without leaving the catalog. */
+export function QuickView({ slug, onClose }: { slug: string; onClose: () => void }) {
+  const { findProduct, add, wishlist, toggleWishlist, content } = useStore();
+  const p = findProduct(slug);
+  const variants = p ? getVariants(p).filter(v => v.enabled !== false) : [];
+  const [choice, setChoice] = useState<string>(variants[0]?.id ?? "");
+  const [qty, setQty] = useState(1);
+  const [added, setAdded] = useState(false);
+  if (!p) return null;
+  const selected = variants.find(v => v.id === choice) ?? variants[0];
+  const price = selected?.price ?? p.price;
+  const brand = content.brands.find(b => b.slug === p.brand || b.name === p.brand);
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-stone-950/50 p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div role="dialog" aria-modal="true" aria-label={`Quick view ${p.name}`} className="panel-in w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="grid sm:grid-cols-2">
+          <div className="relative bg-[#efede8]"><img src={p.images[0]} alt={p.name} className="aspect-square h-full w-full object-cover" />
+            <button type="button" onClick={onClose} aria-label="Close quick view" className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-white ring-1 ring-stone-200"><Icon name="close" className="h-4 w-4" /></button>
+          </div>
+          <div className="flex flex-col p-5 sm:p-6">
+            {brand && <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">{brand.name}</p>}
+            <h3 className="mt-1 text-lg font-extrabold leading-snug">{p.name}</h3>
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              <span className="flex gap-0.5 text-amber-500">{Array.from({ length: 5 }).map((_, i) => <Icon key={i} name="star" className={`h-3.5 w-3.5 ${i < Math.round(p.rating) ? "" : "text-stone-300"}`} />)}</span>
+              <b className="tnum">{p.rating.toFixed(1)}</b><span className="text-stone-500">({p.reviews} reviews{p.sold ? ` · ${p.sold} sold` : ""})</span>
+            </div>
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="text-2xl font-extrabold tnum">{fmt(price)}</span>
+              {selected && variantComparison(p, selected) && <span className="text-sm text-stone-400 line-through tnum">{fmt(variantComparison(p, selected)!)}</span>}
+            </div>
+            <p className="mt-2 line-clamp-3 text-[13px] text-stone-600">{p.short}</p>
+            {variants.length > 1 && (
+              <div className="mt-4">
+                <p className="mb-1.5 text-[11px] font-bold text-stone-700">Option: <span className="text-stone-500">{selected?.label}</span></p>
+                <div className="flex flex-wrap gap-1.5">
+                  {variants.map(v => <button key={v.id} type="button" onClick={() => setChoice(v.id)} className={`rounded-lg px-3 py-1.5 text-[11px] font-bold ring-1 ${choice === v.id ? "bg-stone-900 text-white ring-stone-900" : "bg-white ring-stone-200 hover:ring-stone-400"}`}>{v.label}</button>)}
+                </div>
+              </div>
+            )}
+            <div className="mt-4 flex items-center gap-2">
+              <QtyStepper small qty={qty} setQty={setQty} max={Math.max(1, p.stock)} />
+              <button type="button" disabled={!p.stock} onClick={() => { if (add(p.slug, qty, selected?.id)) { setAdded(true); setTimeout(() => setAdded(false), 1500); } }} className={`${btnPrimary} h-10 flex-1`}>
+                <Icon name={added ? "check" : "bag"} className="h-4 w-4" />{added ? "Added" : "Add to cart"}
+              </button>
+              <button type="button" onClick={() => toggleWishlist(p.slug)} aria-label="Toggle wishlist" className={`grid h-10 w-10 place-items-center rounded-full ring-1 ${wishlist.includes(p.slug) ? "bg-[#e5484d] text-white ring-[#e5484d]" : "ring-stone-300 hover:ring-stone-900"}`}>
+                <Icon name="heart" className="h-4 w-4" />
+              </button>
+            </div>
+            <Link to={`/product/${p.slug}`} onClick={onClose} className="mt-3 text-center text-xs font-bold text-stone-600 underline underline-offset-4">View full details</Link>
+          </div>
         </div>
       </div>
-    </article>
+    </div>
   );
 }
 
@@ -489,13 +557,14 @@ export function SmartSearch({
 /* ---------- header ---------- */
 
 export function Header() {
-  const { count, user, visibleCategories, settings } = useStore();
+  const { count, user, visibleCategories, settings, wishlist, compare } = useStore();
   const { path } = useRouter();
   const { openCart } = useCartPanel();
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [bumpKey, setBumpKey] = useState(0);
+  const [megaOpen, setMegaOpen] = useState(false);
   const menuTrigger = useRef<HTMLButtonElement>(null);
   const menuPanel = useRef<HTMLDivElement>(null);
 
@@ -559,7 +628,8 @@ export function Header() {
           <p className="flex min-w-0 items-center gap-2"><Icon name="truck" className="h-3.5 w-3.5 text-amber-400" /><span className="truncate">{settings.announcementText}</span></p>
           <div className="flex shrink-0 items-center gap-4">
             {settings.enableCod && <span className="hidden items-center gap-1.5 sm:flex"><Icon name="shield" className="h-3.5 w-3.5 text-emerald-400" />Cash on Delivery available</span>}
-            <span className="hidden items-center gap-1.5 md:flex"><Icon name="phone" className="h-3.5 w-3.5 text-amber-400" />{settings.supportHours}</span>
+            <a href={`tel:${settings.contactPhone}`} className="hidden items-center gap-1.5 md:flex"><Icon name="phone" className="h-3.5 w-3.5 text-amber-400" />{settings.contactPhone}</a>
+            <a href={`mailto:${settings.contactEmail}`} className="hidden items-center gap-1.5 lg:flex"><Icon name="mail" className="h-3.5 w-3.5 text-amber-400" />{settings.contactEmail}</a>
             <Link to="/admin" className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-0.5 text-[10.5px] font-bold text-amber-300 transition hover:bg-white/20">
               <Icon name="settings" className="h-3 w-3" />
               <span>Admin</span>
@@ -591,6 +661,14 @@ export function Header() {
                 <Icon name={searchOpen ? "close" : "search"} className="h-[18px] w-[18px]" />
                 <span className="hidden sm:inline">{searchOpen ? "Close" : "Search"}</span>
               </button>
+              <Link to="/wishlist" aria-label={`Wishlist, ${wishlist.length} items`} className="relative hidden items-center gap-2 rounded-full px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 md:flex">
+                <Icon name="heart" className="h-[18px] w-[18px]" /><span className="hidden xl:inline">Wishlist</span>
+                {wishlist.length > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-amber-400 px-1 text-[9px] font-extrabold text-stone-900 tnum">{wishlist.length}</span>}
+              </Link>
+              <Link to="/compare" aria-label={`Compare, ${compare.length} products`} className="relative hidden items-center gap-2 rounded-full px-2.5 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 xl:flex">
+                <Icon name="sliders" className="h-[18px] w-[18px]" /><span className="hidden 2xl:inline">Compare</span>
+                {compare.length > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-amber-400 px-1 text-[9px] font-extrabold text-stone-900 tnum">{compare.length}</span>}
+              </Link>
               <Link to="/track" className="hidden items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 lg:flex">
                 <Icon name="box" className="h-[18px] w-[18px]" /><span>Track</span>
               </Link>
@@ -614,15 +692,41 @@ export function Header() {
           )}
         </div>
         <div className="hidden border-t border-stone-100 lg:block">
-          <nav aria-label="Categories" className="shell flex h-11 items-center gap-1 overflow-x-auto no-scrollbar">
+          <nav aria-label="Categories" className="shell flex h-11 items-center gap-1">
             <Link to="/shop" className="mr-1.5 flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-stone-900 hover:bg-stone-100">
               <Icon name="grid" className="h-4 w-4" /><span>All products</span>
             </Link>
-            {catLinks.map(([name, href, icon]) => (
+            <div className="relative" onMouseEnter={() => setMegaOpen(true)} onMouseLeave={() => setMegaOpen(false)}>
+              <button type="button" aria-expanded={megaOpen} onClick={() => setMegaOpen(v => !v)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${megaOpen ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100"}`}>
+                <Icon name="grid" className="h-4 w-4" /><span>All Categories</span><Icon name="chevron-down" className={`h-3.5 w-3.5 transition ${megaOpen ? "rotate-180" : ""}`} />
+              </button>
+              {megaOpen && (
+                <div className="panel-in absolute left-0 top-[calc(100%+8px)] z-50 grid w-[560px] grid-cols-2 gap-1 rounded-2xl border border-stone-200 bg-white p-3 shadow-2xl shadow-stone-900/10">
+                  {visibleCategories.filter(c => !c.parent).map(parent => {
+                    const children = visibleCategories.filter(c => c.parent === parent.slug);
+                    return (
+                      <div key={parent.slug}>
+                        <Link to={`/shop/${parent.slug}`} onClick={() => setMegaOpen(false)} className="flex items-center gap-2 rounded-lg px-2 py-2 text-xs font-extrabold text-stone-900 hover:bg-stone-100">
+                          <Icon name={parent.icon ?? CATEGORY_ICON[parent.slug] ?? "box"} className="h-4 w-4 text-amber-600" />{parent.name}
+                        </Link>
+                        {children.map(child => (
+                          <Link key={child.slug} to={`/shop/${child.slug}`} onClick={() => setMegaOpen(false)} className="block rounded-lg px-2 py-1.5 pl-8 text-[11px] font-medium text-stone-600 hover:bg-stone-100 hover:text-stone-900">{child.name}</Link>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {catLinks.slice(0, 5).map(([name, href, icon]) => (
               <Link key={href} to={href} className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900">
                 <Icon name={icon} className="h-4 w-4" /><span>{name}</span>
               </Link>
             ))}
+            <Link to="/shop?sale=1" className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-[#b45309] hover:bg-amber-50"><Icon name="tag" className="h-4 w-4" /><span>Deals</span></Link>
+            <Link to="/brands" className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900"><span>Brands</span></Link>
+            <Link to="/blog" className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900"><span>Blog</span></Link>
+            <Link to="/contact" className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900"><span>Help</span></Link>
             <a href={`https://wa.me/${settings.whatsappNumber}`} target="_blank" rel="noopener noreferrer" className="ml-auto flex shrink-0 items-center gap-1.5 pl-3 text-xs font-semibold text-stone-600 hover:text-stone-900">
               <Icon name="whatsapp" className="h-4 w-4 text-[#25D366]" /><span>Need help choosing?</span>
             </a>

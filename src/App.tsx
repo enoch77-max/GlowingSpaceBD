@@ -10,6 +10,7 @@ import { Home } from "./views/Home";
 import { Catalog, ProductPage } from "./views/Shop";
 import { Cart, Checkout, Confirmation, Track, Login } from "./views/Order";
 import { NotFound } from "./views/NotFound";
+import { Wishlist, Compare, Contact, BrandsPage, BrandPage, BlogPage, BlogPostPage, CmsPage } from "./views/Extras";
 import { AdminPage } from "./views/Admin";
 
 function Shell() {
@@ -44,6 +45,14 @@ function Shell() {
   } else if (path === "/cart") page = <Cart />;
   else if (path === "/checkout") page = <Checkout />;
   else if ((m = match("/order/:id", path))) page = <Confirmation id={m.id} />;
+  else if (path === "/wishlist") page = <Wishlist />;
+  else if (path === "/compare") page = <Compare />;
+  else if (path === "/contact") page = <Contact />;
+  else if (path === "/blog") page = <BlogPage />;
+  else if ((m = match("/blog/:slug", path))) page = <BlogPostPage slug={m.slug} />;
+  else if (path === "/brands") page = <BrandsPage />;
+  else if ((m = match("/brand/:slug", path))) page = <BrandPage slug={m.slug} />;
+  else if ((m = match("/page/:slug", path))) page = <CmsPage slug={m.slug} />;
   else if (path === "/track") page = <Track />;
   else if (path === "/login") page = <Login />;
   else page = <NotFound />;

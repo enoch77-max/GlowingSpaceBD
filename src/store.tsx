@@ -30,6 +30,7 @@ import {
   type VaultEnv,
 } from "./admin/secretsVault";
 import { orderUpdateIssue } from "./admin/orderWorkflow";
+import { seedContent, type ContentState } from "./commerce";
 import { batchCreateIssue, stepState, type StepKey } from "./admin/batches";
 import type { CourierPickupResult } from "./admin/courier";
 import { ToastProvider, useNotify } from "./toast";
@@ -239,6 +240,13 @@ interface Store {
   /* Live Storefront Catalog & Config (Admin-Controlled) */
   catalogReady: boolean;
   refreshCatalog: () => Promise<void>;
+  content: ContentState;
+  saveContent: (patch: Partial<ContentState>, summary?: string) => Promise<boolean>;
+  refreshContent: () => Promise<void>;
+  wishlist: string[];
+  compare: string[];
+  toggleWishlist: (slug: string) => void;
+  toggleCompare: (slug: string) => void;
   catalogProducts: Product[];
   visibleProducts: Product[];
   catalogCategories: Category[];
@@ -329,6 +337,34 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
   const [savedSettings, setSettings] = usePersist<StoreSettings>("gs_store_settings_v1", defaultSettings);
   // Fill fields introduced after an older browser saved its settings.
   const settings = useMemo(() => ({ ...defaultSettings, ...savedSettings }), [savedSettings]);
+
+  const [content, setContent] = usePersist<ContentState>("gs_content_v1", seedContent());
+  const contentRequest = useRef(0);
+  const refreshContent = useCallback(async () => {
+    const request = ++contentRequest.current;
+    try {
+      const response = await fetch("/api/content", { cache: "no-store" });
+      const data = await response.json();
+      if (request !== contentRequest.current || !response.ok || !data?.content) return;
+      setContent(prev => ({ ...prev, ...data.content }));
+      if (data.settings) setSettings(data.settings);
+    } catch { /* keep cached content */ }
+  }, [setContent]);
+  useEffect(() => { void refreshContent(); }, [refreshContent]);
+  const saveContent = useCallback(async (patch: Partial<ContentState>, summary = "Updated store content") => {
+    try {
+      const response = await fetch("/api/content", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patch, summary }) });
+      const data = await response.json();
+      if (!response.ok) { notify(data.error ?? "Content was not saved. Retry when connected."); await refreshContent(); return false; }
+      if (data.content) setContent(prev => ({ ...prev, ...data.content }));
+      return true;
+    } catch { notify("Content was not saved. Your draft remains available to retry."); return false; }
+  }, [setContent, notify, refreshContent]);
+
+  const [wishlist, setWishlist] = usePersist<string[]>("gs_wishlist", []);
+  const [compare, setCompare] = usePersist<string[]>("gs_compare", []);
+  const toggleWishlist = (slug: string) => { setWishlist(prev => prev.includes(slug) ? prev.filter(x => x !== slug) : [...prev, slug].slice(0, 50)); document.dispatchEvent(new CustomEvent("cart:bump")); };
+  const toggleCompare = (slug: string) => setCompare(prev => prev.includes(slug) ? prev.filter(x => x !== slug) : [...prev, slug].slice(0, 4));
 
   const [cart, setCart] = usePersist<Line[]>("gs_cart", []);
   const cartRef = useRef(cart);
@@ -1000,7 +1036,7 @@ function StoreStateProvider({ children }: { children: ReactNode }) {
       user, login: setUser, logout: () => setUser(null),
       orders: normalizedOrders, customerOrders, saveOrder, notify,
 
-      catalogReady, refreshCatalog, catalogProducts, visibleProducts, catalogCategories, visibleCategories,
+      catalogReady, refreshCatalog, content, saveContent, refreshContent, wishlist, compare, toggleWishlist, toggleCompare, catalogProducts, visibleProducts, catalogCategories, visibleCategories,
       findProduct, categoryLabel, heroSlides, couponRules, settings,
 
       staff, currentAdmin, can, signInAdmin, switchAdminRole, signOutAdmin,

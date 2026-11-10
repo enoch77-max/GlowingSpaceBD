@@ -131,6 +131,23 @@ export function productInventoryIssue(p: Product): string | null {
 }
 
 /** Validates mixed variants together, then deducts from exactly the right stock source. */
+export function restoreInventory(p: Product, lines: InventoryLine[]): Product {
+  const selected = lines.filter(line => line.slug === p.slug);
+  const mode = inventoryMode(p);
+  if (mode === "independent") {
+    const demand = new Map<string, number>();
+    for (const line of selected) {
+      const variant = lineVariant(p, line);
+      if (!variant) continue;
+      demand.set(variant.id, (demand.get(variant.id) ?? 0) + count(line.qty));
+    }
+    const variants = getVariants(p).map(v => ({ ...v, stock: count(v.stock) + (demand.get(v.id) ?? 0) }));
+    return normalizeProduct({ ...p, variants, inventoryVersion: (p.inventoryVersion ?? 1) + 1 });
+  }
+  const restore = selected.reduce((sum, line) => sum + count(line.qty) * (mode === "shared_units" ? (lineVariant(p, line)?.unitsPerPack ?? 1) : 1), 0);
+  return normalizeProduct({ ...p, stock: count(p.stock) + restore, inventoryVersion: (p.inventoryVersion ?? 1) + 1 });
+}
+
 export function deductInventory(p: Product, lines: InventoryLine[]): Product {
   const selected = lines.filter(line => line.slug === p.slug);
   const demand = new Map<string, number>();

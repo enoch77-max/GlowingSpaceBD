@@ -43,6 +43,18 @@ export interface Product {
   kit?: boolean;
   published?: boolean;
   aliases?: string[];
+  brand?: string;
+  tags?: string[];
+  attrs?: Record<string, string>;
+  sold?: number;
+  views?: number;
+  isNew?: boolean;
+  isFeatured?: boolean;
+  isBestSeller?: boolean;
+  trashed?: boolean;
+  seoTitle?: string;
+  seoKeywords?: string;
+  seoDescription?: string;
 }
 
 export interface Category {
@@ -52,6 +64,8 @@ export interface Category {
   img: string;
   icon?: IconName;
   visible?: boolean;
+  parent?: string;
+  order?: number;
 }
 
 export type HeroTheme = "sand" | "ink" | "mint" | "amber";
@@ -103,6 +117,51 @@ export interface StoreSettings {
   pickupContact: string;
   pickupPhone: string;
   defaultCourier: "Steadfast" | "Pathao" | "RedX";
+  // Ported from Universal Shop settings matrix
+  siteTagline: string;
+  currencySymbol: string;
+  currencyCode: string;
+  currencyPosition: "before" | "after";
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  returnDays: number;
+  taxEnabled: boolean;
+  taxLabel: string;
+  taxRate: number;
+  contactEmail: string;
+  contactPhone: string;
+  contactAddress: string;
+  businessHours: string;
+  mapEmbedUrl: string;
+  social: Record<string, string>;
+  metaTitle: string;
+  metaKeywords: string;
+  metaDescription: string;
+  gaId: string;
+  allowIndexing: boolean;
+  announcementLink: string;
+  footerAbout: string;
+  copyrightText: string;
+  productsPerPage: number;
+  guestCheckout: boolean;
+  reviewsAutoApprove: boolean;
+  deliveryInfo: string;
+  returnPolicy: string;
+  logoDark: string;
+  favicon: string;
+  ogImage: string;
+  mailFromName: string;
+  mailFromAddress: string;
+  orderNotificationEmail: string;
+  notifyCustomerEmail: boolean;
+  bkashMode: "manual" | "api";
+  nagadMode: "manual" | "api";
+  bkashManualNumber: string;
+  nagadManualNumber: string;
+  checkoutNote: string;
+  checkoutPaymentMode: "manual" | "eps";
+  epsSandbox: boolean;
 }
 
 const px = (id: number) => `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&w=800`;
@@ -256,6 +315,50 @@ export const defaultSettings: StoreSettings = {
   pickupPhone: "01700000000",
   defaultCourier: "Steadfast",
   faqs,
+  siteTagline: "Tested electronics for makers in Bangladesh",
+  currencySymbol: "৳",
+  currencyCode: "BDT",
+  currencyPosition: "before",
+  primaryColor: "#181814",
+  secondaryColor: "#6b645d",
+  accentColor: "#fbbf24",
+  returnDays: 7,
+  taxEnabled: false,
+  taxLabel: "VAT",
+  taxRate: 0,
+  contactEmail: "support@glowingspace.com.bd",
+  contactPhone: "+880 1700-000000",
+  contactAddress: "House 12, Road 5, Dhanmondi, Dhaka 1205",
+  businessHours: "Sat–Thu, 10am–8pm BDT",
+  mapEmbedUrl: "",
+  social: { facebook: "", instagram: "", twitter: "", youtube: "", linkedin: "", tiktok: "", whatsapp: "8801700000000" },
+  metaTitle: "Glowing Space BD — Tested 18650 cells, modules & car LEDs",
+  metaKeywords: "18650, TP4056, BMS, ESP32, car LED, Bangladesh, COD",
+  metaDescription: "Tested 18650 batteries, charging circuits, car LED lights and unique electronics parts in Bangladesh. COD, bKash & Nagad.",
+  gaId: "",
+  allowIndexing: true,
+  announcementLink: "/shop",
+  footerAbout: "Tested batteries, charging circuits and hard-to-find modules for Bangladesh's students, hobbyists and repair pros.",
+  copyrightText: "",
+  productsPerPage: 24,
+  guestCheckout: true,
+  reviewsAutoApprove: true,
+  deliveryInfo: "Inside Dhaka 1–2 days · Nationwide 2–4 days via Pathao & Steadfast.",
+  returnPolicy: "Unused items can be returned within 7 days. Dead-on-arrival parts are replaced free.",
+  logoDark: "",
+  favicon: "",
+  ogImage: "/img/kit.jpg",
+  mailFromName: "Glowing Space BD",
+  mailFromAddress: "orders@glowingspace.com.bd",
+  orderNotificationEmail: "orders@glowingspace.com.bd",
+  notifyCustomerEmail: true,
+  bkashMode: "manual",
+  nagadMode: "manual",
+  bkashManualNumber: "01700000000",
+  nagadManualNumber: "01700000000",
+  checkoutNote: "Send money to the merchant number and submit the TrxID at checkout.",
+  checkoutPaymentMode: "manual",
+  epsSandbox: true,
 };
 
 const bdtFormatter = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
