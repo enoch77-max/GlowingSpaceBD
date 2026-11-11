@@ -371,7 +371,7 @@ function BatchComposer({ orderIds, onClose, onCreated }: { orderIds: string[]; o
   const submit = () => {
     if (!eligible.length) return setError("Add at least one order that is not already in a batch.");
     if (address.trim().length < 8) return setError("Enter the pickup address.");
-    if (!/^01[3-9]\d{8}$/.test(contactPhone)) return setError("Enter a valid pickup contact number, like 01700000000.");
+    if (!/^01[3-9]\d{8}$/.test(contactPhone)) return setError("Enter a valid pickup contact number, like 01400788738.");
     const result = createBatch({
       name: name || defaultName,
       courier,

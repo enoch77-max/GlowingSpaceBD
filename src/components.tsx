@@ -70,69 +70,70 @@ export function QtyStepper({ qty, setQty, max = 99, small = false }: { qty: numb
 /* ---------- product card ---------- */
 
 export function ProductCard({ p }: { p: Product }) {
-  const { add, categoryLabel, wishlist, compare, toggleWishlist, toggleCompare } = useStore();
+  const { add, categoryLabel, wishlist, toggleWishlist } = useStore();
   const { go } = useRouter();
-  const [quickView, setQuickView] = useState(false);
   const activeVariants = getVariants(p).filter((variant) => variant.enabled !== false);
   const hasOptions = activeVariants.length > 1;
   const available = productAvailable(p);
   const cheapest = [...activeVariants].sort((a, b) => a.price - b.price)[0];
+  const comparison = cheapest ? variantComparison(p, cheapest) : undefined;
   const saving = cheapest ? variantSavings(p, cheapest) : { amount: 0, percent: 0 };
-  const hasDiscount = saving.amount > 0 && !p.original;
+  const hasDiscount = Boolean(comparison && saving.amount > 0 && !p.original);
   const wished = wishlist.includes(p.slug);
-  const comparing = compare.includes(p.slug);
+  const bestSeller = Boolean(p.isBestSeller || p.trending);
+  const specSummary = p.specs.find(([key]) => /capacity|discharge|socket|voltage|output|current|mcu|wireless|includes|power|connector/i.test(key))?.[1] ?? p.specs[0]?.[1] ?? "";
 
   return (
-    <article className="group relative flex min-w-0 flex-col transition duration-300 ease-out hover:-translate-y-1">
-      <div className="relative block aspect-square overflow-hidden rounded-[18px] bg-[#efede8]">
-        <Link to={`/product/${p.slug}`} aria-label={p.name}>
-          <img src={p.images[0]} alt={p.name} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:opacity-0" />
-          {p.images[1] && <img src={p.images[1]} alt="" loading="lazy" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover opacity-0 transition duration-500 group-hover:opacity-100" />}
+    <article className="group relative flex min-w-0 flex-col overflow-hidden rounded-[20px] border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(24,24,20,0.035)] transition duration-300 ease-out hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_14px_30px_-18px_rgba(24,24,20,0.24)]">
+      <div className="relative aspect-square overflow-hidden bg-[#efede8]">
+        <Link to={`/product/${p.slug}`} aria-label={p.name} className="block h-full">
+          <ResponsiveImage src={p.images[0]} alt={p.name} loading="lazy" width={400} height={400} sizes="(max-width: 639px) 50vw, (max-width: 1023px) 33vw, 25vw" className="h-full w-full object-cover transition duration-500 ease-out group-hover:scale-[1.025]" />
+          {p.images[1] && <ResponsiveImage src={p.images[1]} alt="" loading="lazy" width={400} height={400} sizes="(max-width: 639px) 50vw, (max-width: 1023px) 33vw, 25vw" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover opacity-0 transition duration-500 ease-out group-hover:opacity-100" />}
         </Link>
-        <div className="absolute left-2.5 top-2.5 flex flex-col items-start gap-1">
-          {hasDiscount && <span className="rounded-md bg-stone-900 px-2 py-0.5 text-[10px] font-extrabold text-white">-{saving.percent}%</span>}
-          {p.isNew && <span className="rounded-md bg-[#5b8dd9] px-2 py-0.5 text-[10px] font-extrabold text-white">New</span>}
-          {!available && <span className="rounded-md bg-white/95 px-2 py-0.5 text-[10px] font-bold text-stone-700 ring-1 ring-stone-200">Sold out</span>}
+
+        <div className="absolute left-2.5 top-2.5 flex max-w-[calc(100%-1.25rem)] flex-wrap items-center gap-1.5">
+          {p.original ? (
+            <span className="inline-flex items-center gap-1 rounded-lg bg-[#e5f0e5] px-2 py-1 text-[10px] font-extrabold leading-none text-[#275e43]"><Icon name="check-circle" className="h-3 w-3" />Original</span>
+          ) : bestSeller ? (
+            <span className="rounded-lg bg-[#d9f5b0] px-2 py-1 text-[10px] font-extrabold leading-none text-[#31572d]">Bestseller</span>
+          ) : p.isNew ? (
+            <span className="rounded-lg bg-[#e6efff] px-2 py-1 text-[10px] font-extrabold leading-none text-[#31568a]">New</span>
+          ) : null}
+          {hasDiscount && <span className="rounded-lg bg-[#ef5b4a] px-2 py-1 text-[10px] font-extrabold leading-none text-white">-{saving.percent}%</span>}
+          {!available && <span className="rounded-lg bg-white/95 px-2 py-1 text-[10px] font-bold leading-none text-stone-700 shadow-sm">Sold out</span>}
         </div>
-        <div className="absolute right-2.5 top-2.5 flex translate-y-1 flex-col gap-1.5 opacity-0 transition duration-200 group-hover:translate-y-0 group-hover:opacity-100">
-          <button type="button" onClick={() => toggleWishlist(p.slug)} aria-label={wished ? `Remove ${p.name} from wishlist` : `Add ${p.name} to wishlist`} title="Wishlist"
-            className={`grid h-8 w-8 place-items-center rounded-full shadow-sm ring-1 transition ${wished ? "bg-[#e5484d] text-white ring-[#e5484d]" : "bg-white text-stone-700 ring-stone-200 hover:bg-stone-100"}`}>
-            <Icon name="heart" className="h-4 w-4" />
-          </button>
-          <button type="button" onClick={() => setQuickView(true)} aria-label={`Quick view ${p.name}`} title="Quick view" className="grid h-8 w-8 place-items-center rounded-full bg-white text-stone-700 shadow-sm ring-1 ring-stone-200 transition hover:bg-stone-100">
-            <Icon name="eye" className="h-4 w-4" />
-          </button>
-          <button type="button" onClick={() => toggleCompare(p.slug)} aria-label={comparing ? `Remove ${p.name} from compare` : `Compare ${p.name}`} title="Compare" disabled={compare.length >= 4 && !comparing}
-            className={`grid h-8 w-8 place-items-center rounded-full shadow-sm ring-1 transition disabled:opacity-40 ${comparing ? "bg-stone-900 text-white ring-stone-900" : "bg-white text-stone-700 ring-stone-200 hover:bg-stone-100"}`}>
-            <Icon name="sliders" className="h-4 w-4" />
-          </button>
-        </div>
+
+        <button type="button" onClick={() => toggleWishlist(p.slug)} aria-label={wished ? `Remove ${p.name} from wishlist` : `Add ${p.name} to wishlist`} aria-pressed={wished} title={wished ? "Remove from wishlist" : "Add to wishlist"}
+          className={`absolute bottom-2.5 right-2.5 grid h-9 w-9 place-items-center rounded-full shadow-[0_2px_10px_rgba(24,24,20,0.12)] ring-1 transition active:scale-95 ${wished ? "bg-[#e5484d] text-white ring-[#e5484d]" : "bg-white/95 text-stone-700 ring-white/70 hover:bg-white hover:text-[#e5484d]"}`}>
+          <Icon name="heart" className="h-[17px] w-[17px]" strokeWidth={1.9} />
+        </button>
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col pt-3">
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-[10.5px] font-medium text-stone-500">{p.brand ? p.brand : categoryLabel(p.category)}</span>
-          <span aria-label={`Rated ${p.rating.toFixed(1)} out of 5, ${p.reviews} reviews`} title={`${p.rating.toFixed(1)} · ${p.reviews} reviews`} className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-stone-700">
-            <Icon name="star" className="h-3 w-3 text-amber-500" />{p.rating.toFixed(1)}
-          </span>
+      <div className="flex min-w-0 flex-1 flex-col px-3 pb-3 pt-3 sm:px-4 sm:pb-4 sm:pt-3.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate text-[10px] font-extrabold uppercase tracking-[0.12em] text-stone-500">{p.brand || categoryLabel(p.category)}</span>
+          <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${available ? "bg-[#62a85b]" : "bg-stone-300"}`} />
         </div>
-        <Link to={`/product/${p.slug}`} className="mt-1.5 line-clamp-2 min-h-[2.45rem] text-[13.5px] font-semibold leading-[1.4] text-stone-900 transition hover:text-stone-600 sm:text-sm">
+        <Link to={`/product/${p.slug}`} className="mt-1.5 line-clamp-2 min-h-[2.5rem] text-[14px] font-bold leading-[1.35] tracking-[-0.01em] text-stone-900 transition hover:text-stone-600 sm:min-h-[2.65rem] sm:text-[15px]">
           {p.name}
         </Link>
-        <div className="mt-auto grid min-h-11 grid-cols-[minmax(0,1fr)_40px] items-end gap-x-2 pt-2">
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 leading-tight">
-            {hasOptions && <span className="text-[10px] font-medium text-stone-500">From</span>}
-            <span className="min-w-0 text-[15px] font-extrabold tracking-tight text-stone-900 tnum [overflow-wrap:anywhere]">{fmt(p.price)}</span>
-            {hasDiscount && <span className="min-w-0 text-[11px] text-stone-400 line-through tnum [overflow-wrap:anywhere]">{fmt(cheapest ? variantComparison(p, cheapest)! : p.price)}</span>}
-          </div>
-          <button type="button" disabled={!available} aria-label={hasOptions ? `Choose options for ${p.name}` : `Add ${p.name} to cart`}
-            onClick={(e) => { if (hasOptions) { go(`/product/${p.slug}`); return; } if (add(p.slug)) flyToCart(e.currentTarget.closest("article")?.querySelector("img") ?? null, p.images[0]); }}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eeece7] text-stone-800 transition duration-200 hover:bg-stone-900 hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">
-            <Icon name="bag" className="h-4 w-4" />
-          </button>
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-stone-500">
+          {specSummary && <span className="max-w-[52%] truncate" title={specSummary}>{specSummary}</span>}
+          {specSummary && <span aria-hidden="true" className="text-stone-300">·</span>}
+          <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Rated ${p.rating.toFixed(1)} out of 5, ${p.reviews} reviews`}><Icon name="star" className="h-3 w-3 text-amber-500" /><b className="text-stone-700 tnum">{p.rating.toFixed(1)}</b><span>({p.reviews})</span></span>
         </div>
+        <div className="mt-2.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
+          {hasOptions && <span className="text-[10px] font-medium text-stone-500">From</span>}
+          <span className="min-w-0 text-[18px] font-extrabold leading-none tracking-tight text-stone-900 tnum [overflow-wrap:anywhere]">{fmt(p.price)}</span>
+          {comparison && <span className="min-w-0 text-[11px] text-stone-400 line-through tnum [overflow-wrap:anywhere]">{fmt(comparison)}</span>}
+        </div>
+        <button type="button" disabled={!available} aria-label={hasOptions ? `Choose options for ${p.name}` : `Add ${p.name} to bag`}
+          onClick={(e) => { if (hasOptions) { go(`/product/${p.slug}`); return; } if (add(p.slug)) flyToCart(e.currentTarget.closest("article")?.querySelector("img") ?? null, p.images[0]); }}
+          className="mt-3 inline-flex h-10 w-full shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-stone-900 px-2.5 text-[11.5px] font-extrabold text-white transition hover:bg-stone-700 active:scale-[0.985] disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-400 sm:h-11 sm:gap-2 sm:text-[13px]">
+          <Icon name="bag" className="h-4 w-4 shrink-0" />
+          <span>{hasOptions ? "Choose options" : "Add to bag"}</span>
+        </button>
       </div>
-      {quickView && <QuickView slug={p.slug} onClose={() => setQuickView(false)} />}
     </article>
   );
 }
@@ -727,7 +728,7 @@ export function Header() {
             <Link to="/brands" className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900"><span>Brands</span></Link>
             <Link to="/blog" className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900"><span>Blog</span></Link>
             <Link to="/contact" className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900"><span>Help</span></Link>
-            <a href={`https://wa.me/${settings.whatsappNumber}`} target="_blank" rel="noopener noreferrer" className="ml-auto flex shrink-0 items-center gap-1.5 pl-3 text-xs font-semibold text-stone-600 hover:text-stone-900">
+            <a href={`https://wa.me/${settings.whatsappNumber}`} target="_blank" rel="noopener noreferrer" className="ml-auto hidden shrink-0 items-center gap-1.5 pl-3 text-xs font-semibold text-stone-600 hover:text-stone-900 2xl:flex">
               <Icon name="whatsapp" className="h-4 w-4 text-[#25D366]" /><span>Need help choosing?</span>
             </a>
           </nav>

@@ -31,7 +31,7 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/app_db
 
 # Optional storefront settings
 NEXT_PUBLIC_SITE_URL=https://glowingspace.com.bd
-NEXT_PUBLIC_WHATSAPP_NUMBER=8801700000000
+NEXT_PUBLIC_WHATSAPP_NUMBER=8801400788738
 ```
 > **Zero-Config Build Resiliency**: `src/db/index.ts` includes a safe fallback so running `npm run build` or typechecking in environments without a configured `DATABASE_URL` will never crash or fail during static page generation.
 
